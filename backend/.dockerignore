@@ -1,0 +1,36 @@
+# Dependencies
+node_modules
+npm-debug.log
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+
+# Git
+.git
+.gitignore
+
+# Docker
+Dockerfile
+docker-compose*.yml
+
+# Tests
+coverage
+*.test.js
+*.spec.js
+__tests__
+
+# Documentation
+*.md
+docs
+
+# Build artifacts
+dist
+build
