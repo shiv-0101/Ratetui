@@ -5,7 +5,13 @@
  */
 
 const express = require('express');
-const { isRedisConnected, getRedisClient } = require('../config/redis');
+const { 
+  isRedisConnected, 
+  getRedisClient, 
+  getConnectionStatus,
+  pingRedis,
+  getFailureMode,
+} = require('../config/redis');
 
 const router = express.Router();
 
@@ -32,47 +38,81 @@ router.get('/detailed', async (req, res) => {
   const components = {
     redis: {
       status: 'unknown',
+      connected: false,
       latency: null,
+      failureMode: getFailureMode(),
     },
   };
 
   // Check Redis
   try {
+    const connectionStatus = getConnectionStatus();
+    
     if (isRedisConnected()) {
-      const redisClient = getRedisClient();
-      const start = Date.now();
-      await redisClient.ping();
-      const latency = Date.now() - start;
+      const latency = await pingRedis();
       
-      components.redis = {
-        status: 'healthy',
-        latency: `${latency}ms`,
-      };
+      if (latency !== null) {
+        components.redis = {
+          status: 'healthy',
+          connected: true,
+          latency: `${latency}ms`,
+          lastPingTime: connectionStatus.lastPingTime,
+          failureMode: connectionStatus.failureMode,
+          clientStatus: connectionStatus.client,
+        };
+      } else {
+        components.redis = {
+          status: 'unhealthy',
+          connected: false,
+          error: 'Ping failed',
+          failureMode: connectionStatus.failureMode,
+        };
+      }
     } else {
       components.redis = {
         status: 'unhealthy',
-        error: 'Not connected',
+        connected: false,
+        error: connectionStatus.lastError ? connectionStatus.lastError.message : 'Not connected',
+        lastError: connectionStatus.lastError,
+        connectionAttempts: connectionStatus.attempts,
+        failureMode: connectionStatus.failureMode,
+        clientStatus: connectionStatus.client,
       };
     }
   } catch (error) {
     components.redis = {
       status: 'unhealthy',
+      connected: false,
       error: error.message,
+      failureMode: getFailureMode(),
     };
   }
 
-  // Determine overall status
-  const isHealthy = Object.values(components).every(c => c.status === 'healthy');
+  // Determine overall status based on failure mode
+  let isHealthy = true;
+  if (components.redis.status !== 'healthy') {
+    // If Redis is down but we're in 'open' mode, system is degraded but operational
+    isHealthy = getFailureMode() === 'open' ? false : false;
+  }
 
+  const memoryUsage = process.memoryUsage();
   const health = {
-    status: isHealthy ? 'healthy' : 'degraded',
+    status: components.redis.status === 'healthy' ? 'healthy' : 
+            (getFailureMode() === 'open' ? 'degraded' : 'unhealthy'),
     timestamp: new Date().toISOString(),
-    uptime: process.uptime(),
+    uptime: Math.round(process.uptime()),
     version: process.env.npm_package_version || '1.0.0',
     components,
     memory: {
-      heapUsed: `${Math.round(process.memoryUsage().heapUsed / 1024 / 1024)}MB`,
-      heapTotal: `${Math.round(process.memoryUsage().heapTotal / 1024 / 1024)}MB`,
+      heapUsed: `${Math.round(memoryUsage.heapUsed / 1024 / 1024)}MB`,
+      heapTotal: `${Math.round(memoryUsage.heapTotal / 1024 / 1024)}MB`,
+      rss: `${Math.round(memoryUsage.rss / 1024 / 1024)}MB`,
+      external: `${Math.round(memoryUsage.external / 1024 / 1024)}MB`,
+    },
+    process: {
+      pid: process.pid,
+      nodeVersion: process.version,
+      platform: process.platform,
     },
   };
 
