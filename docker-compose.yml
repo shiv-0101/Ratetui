@@ -45,8 +45,20 @@ services:
     command: >
       redis-server
       --appendonly yes
+      --appendfsync everysec
+      --auto-aof-rewrite-percentage 100
+      --auto-aof-rewrite-min-size 64mb
+      --save 900 1
+      --save 300 10
+      --save 60 10000
       --maxmemory 256mb
       --maxmemory-policy allkeys-lru
+      --maxmemory-samples 5
+      --tcp-keepalive 300
+      --timeout 0
+      --tcp-backlog 511
+      --databases 16
+      --loglevel notice
     networks:
       - ratetui-network
     restart: unless-stopped
@@ -56,6 +68,12 @@ services:
       timeout: 5s
       retries: 5
       start_period: 5s
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 256M
 
   # ===========================================
   # Frontend Service (placeholder)
