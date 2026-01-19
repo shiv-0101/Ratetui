@@ -163,16 +163,25 @@ const getClientIdentifier = (req, identifierType = 'ip') => {
 };
 
 /**
- * Set rate limit headers on response
+ * Set comprehensive rate limit headers on response
  */
-const setRateLimitHeaders = (res, rateLimiterRes, limit) => {
+const setRateLimitHeaders = (res, rateLimiterRes, config) => {
+  const remaining = Math.max(0, rateLimiterRes.remainingPoints);
   const resetTime = Math.ceil(Date.now() / 1000) + Math.ceil(rateLimiterRes.msBeforeNext / 1000);
+  const resetInSeconds = Math.ceil(rateLimiterRes.msBeforeNext / 1000);
   
-  res.set({
-    'X-RateLimit-Limit': limit,
-    'X-RateLimit-Remaining': Math.max(0, rateLimiterRes.remainingPoints),
-    'X-RateLimit-Reset': resetTime,
-  });
+  const headers = {
+    'X-RateLimit-Limit': String(config.points),
+    'X-RateLimit-Remaining': String(remaining),
+    'X-RateLimit-Reset': String(resetTime),
+    'X-RateLimit-Window': `${config.duration}s`,
+  };
+  
+  if (remaining === 0) {
+    headers['X-RateLimit-RetryAfter'] = String(resetInSeconds);
+  }
+  
+  res.set(headers);
 };
 
 /**
@@ -222,29 +231,36 @@ const createRateLimiterMiddleware = (options = {}) => {
       // Get rate limiter
       const rateLimiter = getRateLimiter(config);
 
-      // Consume point
+      // Consume point (sliding window counter)
       const rateLimiterRes = await rateLimiter.consume(key);
 
-      // Set headers
-      setRateLimitHeaders(res, rateLimiterRes, config.points);
+      // Set comprehensive rate limit headers
+      setRateLimitHeaders(res, rateLimiterRes, config);
 
       next();
     } catch (error) {
       // Rate limit exceeded
       if (error.remainingPoints !== undefined) {
         const retryAfter = Math.ceil(error.msBeforeNext / 1000);
+        const resetTime = Math.ceil(Date.now() / 1000) + retryAfter;
         
         res.set({
-          'X-RateLimit-Limit': config.points,
-          'X-RateLimit-Remaining': 0,
-          'X-RateLimit-Reset': Math.ceil(Date.now() / 1000) + retryAfter,
-          'Retry-After': retryAfter,
+          'X-RateLimit-Limit': String(config.points),
+          'X-RateLimit-Remaining': '0',
+          'X-RateLimit-Reset': String(resetTime),
+          'X-RateLimit-Window': `${config.duration}s`,
+          'X-RateLimit-RetryAfter': String(retryAfter),
+          'Retry-After': String(retryAfter),
         });
 
-        logger.info('Rate limit exceeded', {
-          ip: req.ip,
+        logger.warn('Rate limit exceeded', {
+          identifier: getClientIdentifier(req, config.identifierType),
+          ip: extractClientIP(req),
+          method: req.method,
           path: req.path,
           retryAfter,
+          limit: config.points,
+          window: config.duration,
         });
 
         return res.status(429).json({
@@ -252,8 +268,11 @@ const createRateLimiterMiddleware = (options = {}) => {
             code: 'RATE_LIMIT_EXCEEDED',
             message: `Too many requests. Please retry after ${retryAfter} seconds.`,
             retryAfter,
+            retryAfterSeconds: retryAfter,
             limit: config.points,
             window: `${config.duration}s`,
+            windowSeconds: config.duration,
+            resetAt: new Date(resetTime * 1000).toISOString(),
           }
         });
       }
@@ -275,10 +294,10 @@ const createRateLimiterMiddleware = (options = {}) => {
  * Pre-configured rate limiters for common use cases
  */
 const rateLimiters_presets = {
-  // General API rate limit
+  // General API rate limit (200 requests per minute per IP)
   api: createRateLimiterMiddleware({
     keyPrefix: 'api',
-    points: 100,
+    points: 200,
     duration: 60,
     identifierType: 'ip',
   }),
@@ -314,5 +333,7 @@ module.exports = {
   createRateLimiterMiddleware,
   rateLimiters: rateLimiters_presets,
   getClientIdentifier,
+  extractClientIP,
+  isValidIP,
   setRateLimitHeaders,
 };
