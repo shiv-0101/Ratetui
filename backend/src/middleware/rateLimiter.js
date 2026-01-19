@@ -63,6 +63,24 @@ const getMemoryLimiter = (config) => {
 };
 
 /**
+ * Validate if IP address is legitimate
+ */
+const isValidIP = (ip) => {
+  if (!ip || ip === 'unknown') return false;
+  
+  // IPv4 validation
+  const ipv4Regex = /^(\d{1,3}\.){3}\d{1,3}$/;
+  if (ipv4Regex.test(ip)) {
+    const parts = ip.split('.');
+    return parts.every(part => parseInt(part, 10) <= 255);
+  }
+  
+  // IPv6 validation (simplified)
+  const ipv6Regex = /^([0-9a-fA-F]{0,4}:){2,7}[0-9a-fA-F]{0,4}$/;
+  return ipv6Regex.test(ip);
+};
+
+/**
  * Extract client identifier from request
  */
 const getClientIdentifier = (req, identifierType = 'ip') => {
