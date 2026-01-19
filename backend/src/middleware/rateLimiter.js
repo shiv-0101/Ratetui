@@ -81,12 +81,76 @@ const isValidIP = (ip) => {
 };
 
 /**
+ * Extract real client IP from request
+ * Handles X-Forwarded-For with security validation
+ */
+const extractClientIP = (req) => {
+  // Priority 1: X-Forwarded-For (if behind proxy)
+  const forwardedFor = req.headers['x-forwarded-for'];
+  if (forwardedFor) {
+    const ips = forwardedFor.split(',').map(ip => ip.trim());
+    
+    for (const ip of ips) {
+      if (isValidIP(ip)) {
+        // Skip private/local IPs in production
+        if (process.env.NODE_ENV === 'production') {
+          if (ip.startsWith('127.') || 
+              ip.startsWith('10.') || 
+              ip.startsWith('192.168.') ||
+              ip.startsWith('172.16.') ||\n              ip === '::1' ||
+              ip.startsWith('fc00:') ||
+              ip.startsWith('fe80:')) {
+            continue;
+          }
+        }
+        return ip;
+      }
+    }
+  }
+  
+  // Priority 2: X-Real-IP header (nginx)
+  const realIP = req.headers['x-real-ip'];
+  if (realIP && isValidIP(realIP)) {
+    return realIP;
+  }
+  
+  // Priority 3: CF-Connecting-IP (Cloudflare)
+  const cfIP = req.headers['cf-connecting-ip'];
+  if (cfIP && isValidIP(cfIP)) {
+    return cfIP;
+  }
+  
+  // Priority 4: req.ip (Express)
+  if (req.ip && isValidIP(req.ip)) {
+    return req.ip;
+  }
+  
+  // Priority 5: Socket remote address
+  const socketIP = req.socket?.remoteAddress || req.connection?.remoteAddress;
+  if (socketIP) {
+    const strippedIP = socketIP.replace(/^::ffff:/, '');
+    if (isValidIP(strippedIP)) {
+      return strippedIP;
+    }
+  }
+  
+  logger.warn('Could not extract valid client IP', {
+    headers: {
+      'x-forwarded-for': req.headers['x-forwarded-for'],
+      'x-real-ip': req.headers['x-real-ip'],
+    },
+    reqIp: req.ip,
+  });
+  
+  return 'unknown';
+};
+
+/**
  * Extract client identifier from request
  */
 const getClientIdentifier = (req, identifierType = 'ip') => {
   switch (identifierType) {
     case 'user':
-      // Get user ID from authenticated request
       return req.user?.id || req.headers['x-user-id'] || null;
     
     case 'apiKey':
@@ -94,11 +158,7 @@ const getClientIdentifier = (req, identifierType = 'ip') => {
     
     case 'ip':
     default:
-      // Get real IP, accounting for proxies
-      return req.ip || 
-             req.headers['x-forwarded-for']?.split(',')[0]?.trim() ||
-             req.connection?.remoteAddress ||
-             'unknown';
+      return extractClientIP(req);
   }
 };
 
