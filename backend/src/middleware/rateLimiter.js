@@ -97,7 +97,8 @@ const extractClientIP = (req) => {
           if (ip.startsWith('127.') || 
               ip.startsWith('10.') || 
               ip.startsWith('192.168.') ||
-              ip.startsWith('172.16.') ||\n              ip === '::1' ||
+              ip.startsWith('172.16.') ||
+              ip === '::1' ||
               ip.startsWith('fc00:') ||
               ip.startsWith('fe80:')) {
             continue;
@@ -292,9 +293,16 @@ const createRateLimiterMiddleware = (options = {}) => {
 
 /**
  * Pre-configured rate limiters for common use cases
+ * 
+ * These presets provide production-ready rate limiting configurations
+ * for different types of endpoints and use cases.
  */
 const rateLimiters_presets = {
-  // General API rate limit (200 requests per minute per IP)
+  /**
+   * General API rate limit
+   * - 200 requests per minute per IP
+   * - Use for standard public API endpoints
+   */
   api: createRateLimiterMiddleware({
     keyPrefix: 'api',
     points: 200,
@@ -302,30 +310,118 @@ const rateLimiters_presets = {
     identifierType: 'ip',
   }),
 
-  // Strict limit for authentication endpoints
+  /**
+   * Authentication endpoints
+   * - 10 requests per minute per IP
+   * - 5 minute block after exceeding limit
+   * - Use for /auth/*, /register, /verify endpoints
+   */
   auth: createRateLimiterMiddleware({
     keyPrefix: 'auth',
     points: 10,
     duration: 60,
-    blockDuration: 300, // Block for 5 minutes after exceeding
+    blockDuration: 300,
     identifierType: 'ip',
   }),
 
-  // Very strict limit for login attempts
+  /**
+   * Login attempts
+   * - 5 attempts per 15 minutes per IP
+   * - 15 minute block after exceeding limit
+   * - Prevents brute-force attacks
+   */
   login: createRateLimiterMiddleware({
     keyPrefix: 'login',
     points: 5,
-    duration: 900, // 15 minutes
+    duration: 900,
     blockDuration: 900,
     identifierType: 'ip',
   }),
 
-  // Admin actions
+  /**
+   * Admin actions
+   * - 50 requests per minute per user
+   * - Use for administrative operations
+   * - Requires authentication (user-based)
+   */
   admin: createRateLimiterMiddleware({
     keyPrefix: 'admin',
     points: 50,
     duration: 60,
     identifierType: 'user',
+  }),
+
+  /**
+   * Search/Query operations
+   * - 30 requests per minute per IP
+   * - Use for search, filter, query endpoints
+   */
+  search: createRateLimiterMiddleware({
+    keyPrefix: 'search',
+    points: 30,
+    duration: 60,
+    identifierType: 'ip',
+  }),
+
+  /**
+   * Expensive operations
+   * - 10 requests per minute per IP
+   * - Use for resource-intensive endpoints (reports, exports, AI operations)
+   */
+  expensive: createRateLimiterMiddleware({
+    keyPrefix: 'expensive',
+    points: 10,
+    duration: 60,
+    identifierType: 'ip',
+  }),
+
+  /**
+   * File upload
+   * - 5 uploads per hour per IP
+   * - Use for file upload endpoints
+   */
+  upload: createRateLimiterMiddleware({
+    keyPrefix: 'upload',
+    points: 5,
+    duration: 3600,
+    identifierType: 'ip',
+  }),
+
+  /**
+   * Password reset
+   * - 3 requests per hour per IP
+   * - Prevents password reset abuse
+   */
+  passwordReset: createRateLimiterMiddleware({
+    keyPrefix: 'password_reset',
+    points: 3,
+    duration: 3600,
+    blockDuration: 3600,
+    identifierType: 'ip',
+  }),
+
+  /**
+   * Email sending
+   * - 10 emails per hour per IP
+   * - Prevents email spam
+   */
+  email: createRateLimiterMiddleware({
+    keyPrefix: 'email',
+    points: 10,
+    duration: 3600,
+    identifierType: 'ip',
+  }),
+
+  /**
+   * API key based
+   * - 1000 requests per hour per API key
+   * - Use for API key authenticated endpoints
+   */
+  apiKey: createRateLimiterMiddleware({
+    keyPrefix: 'apikey',
+    points: 1000,
+    duration: 3600,
+    identifierType: 'apiKey',
   }),
 };
 
