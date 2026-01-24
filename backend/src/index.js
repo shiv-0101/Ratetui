@@ -16,6 +16,11 @@ const logger = require('./utils/logger');
 const { connectRedis, closeRedis } = require('./config/redis');
 const { corsOptions } = require('./config/cors');
 const errorHandler = require('./middleware/errorHandler');
+const { 
+  addRequestId, 
+  morganMiddleware, 
+  logSlowRequest 
+} = require('./middleware/requestLogger');
 
 // Import routes
 const healthRoutes = require('./routes/health');
@@ -69,15 +74,17 @@ app.set('trust proxy', trustProxy);
 // Request Parsing & Logging
 // ===========================================
 
+// Add request ID to all requests
+app.use(addRequestId);
+
 // Body parsing with size limits
 app.use(express.json({ limit: '100kb' }));
 app.use(express.urlencoded({ extended: true, limit: '100kb' }));
 
-// Request logging
+// Request logging with request ID, IP masking, and timing
 if (process.env.NODE_ENV !== 'test') {
-  app.use(morgan(process.env.LOG_FORMAT || 'dev', {
-    stream: { write: (message) => logger.http(message.trim()) }
-  }));
+  app.use(morganMiddleware);
+  app.use(logSlowRequest);
 }
 
 // ===========================================
