@@ -132,7 +132,7 @@ const morganMiddleware = process.env.NODE_ENV === 'production'
 /**
  * Log errors with full details
  */
-const logError = (err, req, res) => {
+const logError = (err, req, _res) => {
   logger.error('Request Error', {
     requestId: req.id,
     method: req.method,

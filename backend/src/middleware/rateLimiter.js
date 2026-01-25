@@ -151,15 +151,15 @@ const extractClientIP = (req) => {
  */
 const getClientIdentifier = (req, identifierType = 'ip') => {
   switch (identifierType) {
-    case 'user':
-      return req.user?.id || req.headers['x-user-id'] || null;
+  case 'user':
+    return req.user?.id || req.headers['x-user-id'] || null;
     
-    case 'apiKey':
-      return req.headers['x-api-key'] || null;
+  case 'apiKey':
+    return req.headers['x-api-key'] || null;
     
-    case 'ip':
-    default:
-      return extractClientIP(req);
+  case 'ip':
+  default:
+    return extractClientIP(req);
   }
 };
 

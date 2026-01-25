@@ -30,6 +30,11 @@ describe('Redis Connection Module', () => {
     jest.clearAllMocks();
   });
 
+  afterAll(async () => {
+    await closeRedis();
+    jest.clearAllTimers();
+  });
+
   describe('connectRedis', () => {
     test('should connect to Redis successfully', async () => {
       const result = await connectRedis();

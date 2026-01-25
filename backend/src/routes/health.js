@@ -6,10 +6,9 @@
 
 const express = require('express');
 const { 
-  isRedisConnected, 
-  getRedisClient, 
   getConnectionStatus,
   pingRedis,
+  isRedisConnected,
   getFailureMode,
 } = require('../config/redis');
 
@@ -98,7 +97,7 @@ router.get('/detailed', async (req, res) => {
   const memoryUsage = process.memoryUsage();
   const health = {
     status: components.redis.status === 'healthy' ? 'healthy' : 
-            (getFailureMode() === 'open' ? 'degraded' : 'unhealthy'),
+      (getFailureMode() === 'open' ? 'degraded' : 'unhealthy'),
     timestamp: new Date().toISOString(),
     uptime: Math.round(process.uptime()),
     version: process.env.npm_package_version || '1.0.0',

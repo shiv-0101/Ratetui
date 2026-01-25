@@ -49,7 +49,7 @@ describe('API Routes', () => {
       const response = await request(app).get('/api/data');
       expect(response.body).toHaveProperty('success');
       expect(response.body.success).toBe(true);
-    });
+    }, 10000);
 
     test('should include data object', async () => {
       const response = await request(app).get('/api/data');

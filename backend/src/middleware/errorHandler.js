@@ -54,7 +54,7 @@ const createError = (code, customMessage = null, details = null) => {
 /**
  * Error handler middleware
  */
-const errorHandler = (err, req, res, next) => {
+const errorHandler = (err, req, res, _next) => {
   // Log error
   logger.error('Error occurred', {
     error: err.message,

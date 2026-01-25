@@ -6,7 +6,7 @@
  */
 
 const express = require('express');
-const { rateLimiters, createRateLimiterMiddleware } = require('../middleware/rateLimiter');
+const { rateLimiters } = require('../middleware/rateLimiter');
 
 const router = express.Router();
 
@@ -70,6 +70,7 @@ router.get('/search',
           { id: 2, title: 'Sample result 2' },
         ],
         message: 'Search endpoint with 30 req/min limit',
+        timestamp: new Date().toISOString(),
       }
     });
   }
