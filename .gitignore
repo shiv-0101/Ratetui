@@ -69,3 +69,8 @@ dump.rdb
 
 # Docker volumes (local)
 .docker-data/
+
+# JWT Keys (NEVER commit these)
+backend/keys/
+*.key
+*.pem
