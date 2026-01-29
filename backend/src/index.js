@@ -25,6 +25,7 @@ const {
 const healthRoutes = require('./routes/health');
 const apiRoutes = require('./routes/api');
 const adminRoutes = require('./routes/admin');
+const authRoutes = require('./routes/auth');
 
 const app = express();
 
@@ -95,6 +96,9 @@ app.use('/health', healthRoutes);
 
 // API routes (will have rate limiting applied)
 app.use('/api', apiRoutes);
+
+// Auth routes (login, logout, refresh)
+app.use('/admin/auth', authRoutes);
 
 // Admin routes (authentication required)
 app.use('/admin', adminRoutes);
