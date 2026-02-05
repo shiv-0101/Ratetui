@@ -248,6 +248,41 @@ const shouldAllowRequests = () => {
   return failureMode === 'open';
 };
 
+/**
+ * Get Redis memory and server info
+ * @returns {Object|null} Redis info object or null if unavailable
+ */
+const getRedisInfo = async () => {
+  if (!redisClient || !isConnected) {
+    return null;
+  }
+
+  try {
+    const info = await redisClient.info();
+    const lines = info.split('\r\n');
+    const result = {};
+
+    for (const line of lines) {
+      if (line.includes(':')) {
+        const [key, value] = line.split(':');
+        result[key] = value;
+      }
+    }
+
+    return {
+      usedMemory: result.used_memory_human || 'unknown',
+      usedMemoryPeak: result.used_memory_peak_human || 'unknown',
+      connectedClients: parseInt(result.connected_clients, 10) || 0,
+      uptimeInSeconds: parseInt(result.uptime_in_seconds, 10) || 0,
+      redisVersion: result.redis_version || 'unknown',
+      totalKeys: parseInt(result.db0?.split(',')[0]?.split('=')[1], 10) || 0,
+    };
+  } catch (error) {
+    logger.error('Redis: Failed to get info', { error: error.message });
+    return null;
+  }
+};
+
 module.exports = {
   connectRedis,
   getRedisClient,
@@ -257,4 +292,5 @@ module.exports = {
   closeRedis,
   getFailureMode,
   shouldAllowRequests,
+  getRedisInfo,
 };

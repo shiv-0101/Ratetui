@@ -10,6 +10,7 @@ const {
   pingRedis,
   isRedisConnected,
   getFailureMode,
+  getRedisInfo,
 } = require('../config/redis');
 
 const router = express.Router();
@@ -51,6 +52,7 @@ router.get('/detailed', async (req, res) => {
       const latency = await pingRedis();
       
       if (latency !== null) {
+        const redisInfo = await getRedisInfo();
         components.redis = {
           status: 'healthy',
           connected: true,
@@ -58,6 +60,15 @@ router.get('/detailed', async (req, res) => {
           lastPingTime: connectionStatus.lastPingTime,
           failureMode: connectionStatus.failureMode,
           clientStatus: connectionStatus.client,
+          memory: redisInfo ? {
+            used: redisInfo.usedMemory,
+            peak: redisInfo.usedMemoryPeak,
+          } : null,
+          server: redisInfo ? {
+            version: redisInfo.redisVersion,
+            uptime: redisInfo.uptimeInSeconds,
+            connectedClients: redisInfo.connectedClients,
+          } : null,
         };
       } else {
         components.redis = {
