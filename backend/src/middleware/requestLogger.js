@@ -176,3 +176,44 @@ module.exports = {
   logSlowRequest,
   maskIP,
 };
+
+/**
+ * Request timeout middleware
+ * Terminates requests that exceed the specified timeout
+ * @param {number} timeout - Timeout in milliseconds (default: 30000)
+ */
+const requestTimeout = (timeout = 30000) => {
+  return (req, res, next) => {
+    const timeoutId = setTimeout(() => {
+      if (!res.headersSent) {
+        logger.warn('Request timeout', {
+          requestId: req.id,
+          method: req.method,
+          url: req.url,
+          timeout: `${timeout}ms`,
+        });
+
+        res.status(408).json({
+          error: {
+            code: 'REQUEST_TIMEOUT',
+            message: 'Request timeout - the server did not receive a complete request in time',
+          },
+        });
+      }
+    }, timeout);
+
+    res.on('finish', () => clearTimeout(timeoutId));
+    res.on('close', () => clearTimeout(timeoutId));
+
+    next();
+  };
+};
+
+module.exports = {
+  addRequestId,
+  morganMiddleware,
+  logError,
+  logSlowRequest,
+  maskIP,
+  requestTimeout,
+};

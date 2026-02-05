@@ -18,7 +18,8 @@ const errorHandler = require('./middleware/errorHandler');
 const { 
   addRequestId, 
   morganMiddleware, 
-  logSlowRequest 
+  logSlowRequest,
+  requestTimeout,
 } = require('./middleware/requestLogger');
 
 // Import routes
@@ -77,6 +78,9 @@ app.set('trust proxy', trustProxy);
 // Add request ID to all requests
 app.use(addRequestId);
 
+// Request timeout (30 seconds)
+app.use(requestTimeout(30000));
+
 // Body parsing with size limits
 app.use(express.json({ limit: '100kb' }));
 app.use(express.urlencoded({ extended: true, limit: '100kb' }));
@@ -127,8 +131,33 @@ app.use(errorHandler);
 const PORT = process.env.PORT || 3000;
 const HOST = process.env.HOST || '0.0.0.0';
 
+// Load package info for startup banner
+const pkg = require('../package.json');
+
+/**
+ * Display startup banner with version and config info
+ */
+const displayStartupBanner = () => {
+  const banner = `
+╔══════════════════════════════════════════════════════════╗
+║                   RATETUI RATE LIMITER                   ║
+╠══════════════════════════════════════════════════════════╣
+║  Version:     ${pkg.version.padEnd(42)}║
+║  Environment: ${(process.env.NODE_ENV || 'development').padEnd(42)}║
+║  Node.js:     ${process.version.padEnd(42)}║
+║  Host:        ${HOST.padEnd(42)}║
+║  Port:        ${String(PORT).padEnd(42)}║
+║  Redis:       ${(process.env.REDIS_HOST || 'localhost').padEnd(42)}║
+╚══════════════════════════════════════════════════════════╝
+`;
+  console.log(banner);
+};
+
 async function startServer() {
   try {
+    // Display startup banner
+    displayStartupBanner();
+
     // Connect to Redis
     await connectRedis();
     logger.info('Connected to Redis');
@@ -139,10 +168,24 @@ async function startServer() {
       logger.info(`Environment: ${process.env.NODE_ENV || 'development'}`);
     });
 
-    // Graceful shutdown
+    // Track active connections for graceful shutdown
+    const activeConnections = new Set();
+    let isShuttingDown = false;
+
+    server.on('connection', (socket) => {
+      activeConnections.add(socket);
+      socket.on('close', () => activeConnections.delete(socket));
+    });
+
+    // Graceful shutdown with connection draining
     const shutdown = async (signal) => {
-      logger.info(`${signal} received. Shutting down gracefully...`);
+      if (isShuttingDown) return;
+      isShuttingDown = true;
       
+      logger.info(`${signal} received. Shutting down gracefully...`);
+      logger.info(`Active connections: ${activeConnections.size}`);
+
+      // Stop accepting new connections
       server.close(async () => {
         logger.info('HTTP server closed');
         
@@ -152,9 +195,27 @@ async function startServer() {
         process.exit(0);
       });
 
+      // Gracefully close existing connections
+      for (const socket of activeConnections) {
+        socket.end();
+      }
+
+      // Wait for connections to drain
+      const drainInterval = setInterval(() => {
+        if (activeConnections.size === 0) {
+          clearInterval(drainInterval);
+          logger.info('All connections drained');
+        } else {
+          logger.info(`Waiting for ${activeConnections.size} connections to close...`);
+        }
+      }, 1000);
+
       // Force shutdown after 10 seconds
       setTimeout(() => {
         logger.error('Forced shutdown after timeout');
+        for (const socket of activeConnections) {
+          socket.destroy();
+        }
         process.exit(1);
       }, 10000);
     };
