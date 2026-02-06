@@ -11,6 +11,8 @@ const {
   isRedisConnected,
   getFailureMode,
   getRedisInfo,
+  testFailureMode,
+  validateRedisConfig,
 } = require('../config/redis');
 
 const router = express.Router();
@@ -147,6 +149,106 @@ router.get('/ready', async (req, res) => {
   }
   
   res.status(503).json({ status: 'not ready', reason: 'Redis not connected' });
+});
+
+/**
+ * Redis-specific health check
+ * GET /health/redis
+ */
+router.get('/redis', async (req, res) => {
+  const redisHealth = {
+    timestamp: new Date().toISOString(),
+    redis: {
+      status: 'unknown',
+      connected: false,
+      diagnostics: {},
+      tests: {},
+    },
+  };
+
+  try {
+    // Basic connection test
+    const connectionStatus = getConnectionStatus();
+    redisHealth.redis.connected = isRedisConnected();
+    redisHealth.redis.failureMode = connectionStatus.failureMode;
+    redisHealth.redis.connectionAttempts = connectionStatus.attempts;
+    redisHealth.redis.lastError = connectionStatus.lastError;
+
+    if (isRedisConnected()) {
+      // Ping test
+      const latency = await pingRedis();
+      redisHealth.redis.latency = latency ? `${latency}ms` : 'failed';
+      redisHealth.redis.lastPingTime = connectionStatus.lastPingTime;
+
+      if (latency !== null) {
+        // Get Redis server info
+        const redisInfo = await getRedisInfo();
+        if (redisInfo) {
+          redisHealth.redis.server = {
+            version: redisInfo.redisVersion,
+            uptime: `${Math.floor(redisInfo.uptimeInSeconds / 60)} minutes`,
+            connectedClients: redisInfo.connectedClients,
+          };
+          
+          redisHealth.redis.memory = {
+            used: redisInfo.usedMemory,
+            peak: redisInfo.usedMemoryPeak,
+          };
+
+          redisHealth.redis.persistence = {
+            totalKeys: redisInfo.totalKeys,
+          };
+        }
+
+        // Performance diagnostics
+        redisHealth.redis.diagnostics = {
+          latencyStatus: latency < 5 ? 'excellent' : latency < 10 ? 'good' : latency < 50 ? 'acceptable' : 'poor',
+          latencyThreshold: '< 5ms excellent, < 10ms good, < 50ms acceptable',
+        };
+
+        // Test failure mode
+        const failureModeTest = await testFailureMode();
+        redisHealth.redis.tests.failureMode = {
+          mode: failureModeTest.mode,
+          opensWhenDown: failureModeTest.opensWhenRedisDown,
+          closesWhenDown: failureModeTest.closesWhenRedisDown,
+          allowsWhenConnected: failureModeTest.allowsWhenConnected,
+          errors: failureModeTest.errors,
+        };
+
+        redisHealth.redis.status = 'healthy';
+      } else {
+        redisHealth.redis.status = 'unhealthy';
+        redisHealth.redis.reason = 'Ping failed';
+      }
+    } else {
+      redisHealth.redis.status = 'disconnected';
+      redisHealth.redis.reason = connectionStatus.lastError?.message || 'Not connected';
+      
+      // Test configuration even when disconnected
+      const configValidation = validateRedisConfig();
+      redisHealth.redis.configuration = {
+        valid: configValidation.valid,
+        errors: configValidation.errors,
+        warnings: configValidation.warnings,
+      };
+    }
+
+    // Overall status
+    const isHealthy = redisHealth.redis.status === 'healthy';
+    const statusCode = isHealthy ? 200 : 503;
+
+    res.status(statusCode).json(redisHealth);
+
+  } catch (error) {
+    redisHealth.redis.status = 'error';
+    redisHealth.redis.error = {
+      message: error.message,
+      timestamp: new Date().toISOString(),
+    };
+    
+    res.status(503).json(redisHealth);
+  }
 });
 
 module.exports = router;
