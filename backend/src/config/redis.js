@@ -15,6 +15,130 @@ let lastPingTime = null;
 let lastPingLatency = null;
 
 /**
+ * Validate Redis environment configuration
+ * @returns {Object} Validation result with errors if any
+ */
+const validateRedisConfig = () => {
+  const errors = [];
+  const warnings = [];
+  
+  const host = process.env.REDIS_HOST;
+  const port = parseInt(process.env.REDIS_PORT, 10);
+  const db = parseInt(process.env.REDIS_DB, 10);
+  
+  // Validate host
+  if (!host) {
+    errors.push('REDIS_HOST environment variable is required');
+  }
+  
+  // Validate port
+  if (isNaN(port) || port < 1 || port > 65535) {
+    errors.push(`Invalid REDIS_PORT: ${process.env.REDIS_PORT}. Must be between 1-65535`);
+  }
+  
+  // Validate database number
+  if (isNaN(db) || db < 0 || db > 15) {
+    errors.push(`Invalid REDIS_DB: ${process.env.REDIS_DB}. Must be between 0-15`);
+  }
+  
+  // Check TLS configuration
+  const tlsEnabled = process.env.REDIS_TLS === 'true';
+  if (tlsEnabled && process.env.NODE_ENV === 'development') {
+    warnings.push('TLS enabled in development mode. Ensure Redis server supports TLS.');
+  }
+  
+  // Check password in production
+  if (process.env.NODE_ENV === 'production' && !process.env.REDIS_PASSWORD) {
+    warnings.push('No Redis password set in production. Consider enabling authentication.');
+  }
+  
+  return { valid: errors.length === 0, errors, warnings, config: { host, port, db, tlsEnabled } };
+};
+
+/**
+ * Test Redis connection with comprehensive validation
+ * @returns {Promise<Object>} Test results
+ */
+const testRedisConnection = async () => {
+  const testResults = {
+    configValid: false,
+    connectionSuccessful: false,
+    pingSuccessful: false,
+    latency: null,
+    errors: [],
+    warnings: [],
+  };
+  
+  // Validate configuration
+  const configValidation = validateRedisConfig();
+  testResults.configValid = configValidation.valid;
+  testResults.errors.push(...configValidation.errors);
+  testResults.warnings.push(...configValidation.warnings);
+  
+  if (!configValidation.valid) {
+    return testResults;
+  }
+  
+  logger.info('Redis: Starting connection test', configValidation.config);
+  
+  // Test connection
+  try {
+    const testClient = new Redis(getRedisOptions());
+    
+    // Wait for ready or error
+    await new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        testClient.disconnect();
+        reject(new Error('Connection timeout after 10 seconds'));
+      }, 10000);
+      
+      testClient.on('ready', () => {
+        clearTimeout(timeout);
+        resolve();
+      });
+      
+      testClient.on('error', (error) => {
+        clearTimeout(timeout);
+        testClient.disconnect();
+        reject(error);
+      });
+    });
+    
+    testResults.connectionSuccessful = true;
+    
+    // Test ping
+    const pingStart = Date.now();
+    const pingResult = await testClient.ping();
+    const pingLatency = Date.now() - pingStart;
+    
+    if (pingResult === 'PONG') {
+      testResults.pingSuccessful = true;
+      testResults.latency = pingLatency;
+      logger.info(`Redis: Connection test successful - latency ${pingLatency}ms`);
+    } else {
+      testResults.errors.push(`Unexpected ping response: ${pingResult}`);
+    }
+    
+    // Test basic operations
+    const testKey = `test:${Date.now()}`;
+    await testClient.set(testKey, 'test-value', 'EX', 10);
+    const retrievedValue = await testClient.get(testKey);
+    
+    if (retrievedValue !== 'test-value') {
+      testResults.warnings.push('Set/Get operation test failed');
+    }
+    
+    await testClient.del(testKey);
+    await testClient.disconnect();
+    
+  } catch (error) {
+    testResults.errors.push(`Connection test failed: ${error.message}`);
+    logger.error('Redis: Connection test failed', { error: error.message });
+  }
+  
+  return testResults;
+};
+/**
  * Redis connection options
  */
 const getRedisOptions = () => {
@@ -24,17 +148,13 @@ const getRedisOptions = () => {
     db: parseInt(process.env.REDIS_DB, 10) || 0,
     retryStrategy: (times) => {
       connectionAttempts = times;
-      if (times > 10) {
-        logger.error('Redis: Max retry attempts (10) reached, stopping reconnection');
-        return null; // Stop retrying
-      }
-      const delay = Math.min(times * 200, 5000); // Exponential backoff up to 5s
-      logger.warn(`Redis: Connection attempt ${times}/10 - retrying in ${delay}ms`);
-      return delay;
+      return getReconnectionDelay(times);
     },
-    maxRetriesPerRequest: 3,
+    maxRetriesPerRequest: parseInt(process.env.REDIS_MAX_RETRIES_PER_REQUEST, 10) || 3,
     enableReadyCheck: true,
     lazyConnect: true,
+    connectTimeout: parseInt(process.env.REDIS_CONNECT_TIMEOUT, 10) || 10000,
+    commandTimeout: parseInt(process.env.REDIS_COMMAND_TIMEOUT, 10) || 5000,
   };
 
   // Add password if provided
@@ -236,6 +356,83 @@ const getFailureMode = () => {
 };
 
 /**
+ * Test failure mode behavior
+ * @param {string} mode - 'open' or 'closed'
+ * @returns {Promise<Object>} Test results
+ */
+const testFailureMode = async (mode = getFailureMode()) => {
+  const testResults = {
+    mode,
+    opensWhenRedisDown: false,
+    closesWhenRedisDown: false,
+    allowsWhenConnected: false,
+    errors: [],
+  };
+  
+  try {
+    // Test behavior when connected
+    if (isRedisConnected()) {
+      testResults.allowsWhenConnected = shouldAllowRequests();
+    }
+    
+    // Simulate Redis failure by temporarily setting connection to false
+    const originalConnected = isConnected;
+    isConnected = false;
+    
+    const shouldAllow = shouldAllowRequests();
+    
+    if (mode === 'open') {
+      testResults.opensWhenRedisDown = shouldAllow === true;
+    } else {
+      testResults.closesWhenRedisDown = shouldAllow === false;
+    }
+    
+    // Restore original connection state
+    isConnected = originalConnected;
+    
+    logger.info(`Redis: Failure mode test completed`, {
+      mode,
+      result: mode === 'open' ? testResults.opensWhenRedisDown : testResults.closesWhenRedisDown,
+    });
+    
+  } catch (error) {
+    testResults.errors.push(`Failure mode test error: ${error.message}`);
+  }
+  
+  return testResults;
+};
+
+/**
+ * Implement exponential backoff reconnection
+ * @param {number} attempt - Current attempt number
+ * @returns {number|null} Delay in milliseconds or null to stop
+ */
+const getReconnectionDelay = (attempt) => {
+  const maxAttempts = parseInt(process.env.REDIS_MAX_RETRIES, 10) || 10;
+  
+  if (attempt > maxAttempts) {
+    logger.error('Redis: Maximum reconnection attempts reached', { 
+      attempts: attempt, 
+      maxAttempts,
+      failureMode: getFailureMode(),
+    });
+    return null;
+  }
+  
+  // Exponential backoff: 200ms, 400ms, 800ms, ... up to 30s
+  const baseDelay = parseInt(process.env.REDIS_RETRY_DELAY, 10) || 200;
+  const maxDelay = parseInt(process.env.REDIS_MAX_RETRY_DELAY, 10) || 30000;
+  const delay = Math.min(attempt * baseDelay * Math.pow(2, attempt - 1), maxDelay);
+  
+  logger.info(`Redis: Scheduling reconnection attempt ${attempt}/${maxAttempts}`, { 
+    delayMs: delay,
+    failureMode: getFailureMode(),
+  });
+  
+  return delay;
+};
+
+/**
  * Check if requests should be allowed based on failure mode
  * @returns {boolean} true if requests should proceed, false if they should be blocked
  */
@@ -293,4 +490,8 @@ module.exports = {
   getFailureMode,
   shouldAllowRequests,
   getRedisInfo,
+  validateRedisConfig,
+  testRedisConnection,
+  testFailureMode,
+  getReconnectionDelay,
 };
