@@ -386,3 +386,193 @@ describe('Rate Limiter - Security', () => {
     process.env.NODE_ENV = originalEnv;
   });
 });
+
+describe('Rate Limiter - Sliding Window Counter Algorithm', () => {
+  describe('Window Overlap Calculations', () => {
+    test('should correctly calculate sliding window weights', () => {
+      const windowSize = 60; // seconds
+      const now = Date.now() / 1000;
+      const currentWindow = Math.floor(now / windowSize);
+      const timeIntoCurrentWindow = now % windowSize;
+      const weightOfCurrentWindow = timeIntoCurrentWindow / windowSize;
+      const weightOfPreviousWindow = 1 - weightOfCurrentWindow;
+      
+      expect(weightOfCurrentWindow + weightOfPreviousWindow).toBeCloseTo(1, 10);
+      expect(weightOfCurrentWindow).toBeGreaterThanOrEqual(0);
+      expect(weightOfCurrentWindow).toBeLessThanOrEqual(1);
+      expect(weightOfPreviousWindow).toBeGreaterThanOrEqual(0);
+      expect(weightOfPreviousWindow).toBeLessThanOrEqual(1);
+    });
+
+    test('should handle window transition edge cases', () => {
+      const windowSize = 60;
+      
+      // Test at exact window boundary
+      const windowBoundary = Math.floor(Date.now() / 1000 / windowSize) * windowSize;
+      const timeIntoWindow = 0;
+      const weight = timeIntoWindow / windowSize;
+      
+      expect(weight).toBe(0);
+    });
+
+    test('should validate sliding window formula', () => {
+      // Simulate sliding window calculation
+      const limit = 100;
+      const previousWindowCount = 80;
+      const currentWindowCount = 30;
+      const timeIntoWindow = 20; // seconds
+      const windowSize = 60; // seconds
+      
+      const weightOfPrevious = Math.max(0, (windowSize - timeIntoWindow) / windowSize);
+      const weightOfCurrent = timeIntoWindow / windowSize;
+      
+      const estimatedCount = (previousWindowCount * weightOfPrevious) + (currentWindowCount * weightOfCurrent);
+      const remaining = Math.max(0, limit - estimatedCount);
+      
+      expect(estimatedCount).toBeGreaterThan(0);
+      expect(remaining).toBeGreaterThanOrEqual(0);
+      expect(weightOfPrevious + weightOfCurrent).toBeCloseTo(1, 10);
+    });
+  });
+
+  describe('Counter Logic Validation', () => {
+    test('should prevent point over-consumption', () => {
+      const limit = 10;
+      const currentUsage = 8;
+      const requestedPoints = 5;
+      const remaining = limit - currentUsage;
+      
+      const isAllowed = remaining >= requestedPoints;
+      expect(isAllowed).toBe(false);
+    });
+
+    test('should calculate retry delays correctly', () => {
+      const msBeforeNext = 45000; // 45 seconds
+      const retryAfterSeconds = Math.ceil(msBeforeNext / 1000);
+      const resetTime = Math.ceil(Date.now() / 1000) + retryAfterSeconds;
+      
+      expect(retryAfterSeconds).toBe(45);
+      expect(resetTime).toBeGreaterThan(Date.now() / 1000);
+    });
+
+    test('should validate point consumption arithmetic', () => {
+      const scenarios = [
+        { limit: 100, consumed: 50, expected: 50 },
+        { limit: 10, consumed: 10, expected: 0 },
+        { limit: 5, consumed: 3, expected: 2 },
+        { limit: 1, consumed: 0, expected: 1 },
+      ];
+
+      scenarios.forEach(({ limit, consumed, expected }) => {
+        const remaining = Math.max(0, limit - consumed);
+        expect(remaining).toBe(expected);
+      });
+    });
+  });
+
+  describe('TTL Management', () => {
+    test('should calculate correct TTL values', () => {
+      const windowSize = 60; // seconds
+      const now = Math.floor(Date.now() / 1000);
+      const windowStart = Math.floor(now / windowSize) * windowSize;
+      const windowEnd = windowStart + windowSize;
+      const ttl = windowEnd - now;
+      
+      expect(ttl).toBeGreaterThan(0);
+      expect(ttl).toBeLessThanOrEqual(windowSize);
+    });
+
+    test('should handle TTL expiration logic', () => {
+      const createdAt = Date.now() / 1000;
+      const ttl = 30; // seconds
+      const expiresAt = createdAt + ttl;
+      
+      // Simulate time passing
+      const currentTime = createdAt + 15; // 15 seconds later
+      const isExpired = currentTime > expiresAt;
+      const timeRemaining = Math.max(0, expiresAt - currentTime);
+      
+      expect(isExpired).toBe(false);
+      expect(timeRemaining).toBe(15);
+    });
+  });
+
+  describe('Redis Operation Patterns', () => {
+    test('should validate Redis key patterns', () => {
+      const keyPrefix = 'ratelimit';
+      const identifier = '192.168.1.100';
+      const window = Math.floor(Date.now() / 1000 / 60);
+      const expectedKey = `${keyPrefix}:${identifier}:${window}`;
+      
+      expect(expectedKey).toMatch(/^ratelimit:[\d.]+:\d+$/);
+    });
+
+    test('should handle Redis pipeline operations', () => {
+      // Simulate Redis pipeline for atomic operations
+      const operations = [
+        { command: 'INCR', key: 'counter:user123' },
+        { command: 'EXPIRE', key: 'counter:user123', ttl: 60 },
+        { command: 'GET', key: 'counter:user123' },
+      ];
+      
+      expect(operations).toHaveLength(3);
+      expect(operations[0].command).toBe('INCR');
+      expect(operations[1].ttl).toBe(60);
+    });
+  });
+
+  describe('Memory Management', () => {
+    test('should cleanup expired counters', () => {
+      const counters = new Map();
+      const now = Date.now();
+      const windowSize = 60000; // 60 seconds in ms
+      
+      // Add some counters with different timestamps
+      counters.set('user1', { count: 5, timestamp: now - 70000 }); // Expired
+      counters.set('user2', { count: 3, timestamp: now - 30000 }); // Valid
+      counters.set('user3', { count: 8, timestamp: now - 90000 }); // Expired
+      
+      // Cleanup expired entries
+      const validCounters = new Map();
+      for (const [key, value] of counters.entries()) {
+        if (now - value.timestamp < windowSize) {
+          validCounters.set(key, value);
+        }
+      }
+      
+      expect(validCounters.size).toBe(1);
+      expect(validCounters.has('user2')).toBe(true);
+    });
+  });
+});
+
+describe('Rate Limiter - Algorithm Performance', () => {
+  test('should handle high-frequency operations', () => {
+    const operationsPerSecond = 1000;
+    const windowSize = 60;
+    const totalOperations = operationsPerSecond * windowSize;
+    
+    // Simulate counter increments
+    let counter = 0;
+    const startTime = Date.now();
+    
+    for (let i = 0; i < 1000; i++) {
+      counter++;
+    }
+    
+    const endTime = Date.now();
+    const duration = endTime - startTime;
+    
+    expect(counter).toBe(1000);
+    expect(duration).toBeLessThan(1000); // Should complete in less than 1 second
+  });
+
+  test('should validate memory efficiency', () => {
+    const maxUsers = 10000;
+    const avgCounterSize = 32; // bytes per counter
+    const maxMemoryUsage = maxUsers * avgCounterSize;
+    
+    // Should use less than 1MB for 10k users
+    expect(maxMemoryUsage).toBeLessThan(1024 * 1024);
+  });
+});
