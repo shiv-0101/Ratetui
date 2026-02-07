@@ -92,15 +92,19 @@ const extractClientIP = (req) => {
     
     for (const ip of ips) {
       if (isValidIP(ip)) {
-        // Skip private/local IPs in production
+        // Skip private/local IPs in production for security
         if (process.env.NODE_ENV === 'production') {
           if (ip.startsWith('127.') || 
               ip.startsWith('10.') || 
               ip.startsWith('192.168.') ||
-              ip.startsWith('172.16.') ||
-              ip === '::1' ||
-              ip.startsWith('fc00:') ||
-              ip.startsWith('fe80:')) {
+              ip.startsWith('172.16.') || ip.startsWith('172.17.') || ip.startsWith('172.18.') ||
+              ip.startsWith('172.19.') || ip.startsWith('172.20.') || ip.startsWith('172.21.') ||
+              ip.startsWith('172.22.') || ip.startsWith('172.23.') || ip.startsWith('172.24.') ||
+              ip.startsWith('172.25.') || ip.startsWith('172.26.') || ip.startsWith('172.27.') ||
+              ip.startsWith('172.28.') || ip.startsWith('172.29.') || ip.startsWith('172.30.') ||
+              ip.startsWith('172.31.') || ip === '::1' ||
+              ip.startsWith('fc00:') || ip.startsWith('fe80:') ||
+              ip.startsWith('fd00:') || ip === '::') {
             continue;
           }
         }
@@ -121,12 +125,18 @@ const extractClientIP = (req) => {
     return cfIP;
   }
   
-  // Priority 4: req.ip (Express)
+  // Priority 4: X-Client-IP (some proxies)
+  const clientIP = req.headers['x-client-ip'];
+  if (clientIP && isValidIP(clientIP)) {
+    return clientIP;
+  }
+  
+  // Priority 5: req.ip (Express)
   if (req.ip && isValidIP(req.ip)) {
     return req.ip;
   }
   
-  // Priority 5: Socket remote address
+  // Priority 6: Socket remote address
   const socketIP = req.socket?.remoteAddress || req.connection?.remoteAddress;
   if (socketIP) {
     const strippedIP = socketIP.replace(/^::ffff:/, '');
@@ -139,6 +149,8 @@ const extractClientIP = (req) => {
     headers: {
       'x-forwarded-for': req.headers['x-forwarded-for'],
       'x-real-ip': req.headers['x-real-ip'],
+      'cf-connecting-ip': req.headers['cf-connecting-ip'],
+      'x-client-ip': req.headers['x-client-ip'],
     },
     reqIp: req.ip,
   });
@@ -300,13 +312,13 @@ const createRateLimiterMiddleware = (options = {}) => {
 const rateLimiters_presets = {
   /**
    * General API rate limit
-   * - 200 requests per minute per IP
+   * - 200 requests per minute per IP (increased from 100 for better UX)
    * - Use for standard public API endpoints
    */
   api: createRateLimiterMiddleware({
     keyPrefix: 'api',
-    points: 200,
-    duration: 60,
+    points: parseInt(process.env.API_RATE_LIMIT, 10) || 200,
+    duration: parseInt(process.env.API_RATE_WINDOW, 10) || 60,
     identifierType: 'ip',
   }),
 
@@ -318,9 +330,9 @@ const rateLimiters_presets = {
    */
   auth: createRateLimiterMiddleware({
     keyPrefix: 'auth',
-    points: 10,
-    duration: 60,
-    blockDuration: 300,
+    points: parseInt(process.env.AUTH_RATE_LIMIT, 10) || 10,
+    duration: parseInt(process.env.AUTH_RATE_WINDOW, 10) || 60,
+    blockDuration: parseInt(process.env.AUTH_BLOCK_DURATION, 10) || 300,
     identifierType: 'ip',
   }),
 
@@ -332,9 +344,9 @@ const rateLimiters_presets = {
    */
   login: createRateLimiterMiddleware({
     keyPrefix: 'login',
-    points: 5,
-    duration: 900,
-    blockDuration: 900,
+    points: parseInt(process.env.LOGIN_RATE_LIMIT, 10) || 5,
+    duration: parseInt(process.env.LOGIN_RATE_WINDOW, 10) || 900,
+    blockDuration: parseInt(process.env.LOGIN_BLOCK_DURATION, 10) || 900,
     identifierType: 'ip',
   }),
 
@@ -346,8 +358,8 @@ const rateLimiters_presets = {
    */
   admin: createRateLimiterMiddleware({
     keyPrefix: 'admin',
-    points: 50,
-    duration: 60,
+    points: parseInt(process.env.ADMIN_RATE_LIMIT, 10) || 50,
+    duration: parseInt(process.env.ADMIN_RATE_WINDOW, 10) || 60,
     identifierType: 'user',
   }),
 
@@ -358,8 +370,8 @@ const rateLimiters_presets = {
    */
   search: createRateLimiterMiddleware({
     keyPrefix: 'search',
-    points: 30,
-    duration: 60,
+    points: parseInt(process.env.SEARCH_RATE_LIMIT, 10) || 30,
+    duration: parseInt(process.env.SEARCH_RATE_WINDOW, 10) || 60,
     identifierType: 'ip',
   }),
 
@@ -370,8 +382,8 @@ const rateLimiters_presets = {
    */
   expensive: createRateLimiterMiddleware({
     keyPrefix: 'expensive',
-    points: 10,
-    duration: 60,
+    points: parseInt(process.env.EXPENSIVE_RATE_LIMIT, 10) || 10,
+    duration: parseInt(process.env.EXPENSIVE_RATE_WINDOW, 10) || 60,
     identifierType: 'ip',
   }),
 
@@ -382,8 +394,8 @@ const rateLimiters_presets = {
    */
   upload: createRateLimiterMiddleware({
     keyPrefix: 'upload',
-    points: 5,
-    duration: 3600,
+    points: parseInt(process.env.UPLOAD_RATE_LIMIT, 10) || 5,
+    duration: parseInt(process.env.UPLOAD_RATE_WINDOW, 10) || 3600,
     identifierType: 'ip',
   }),
 
@@ -394,9 +406,9 @@ const rateLimiters_presets = {
    */
   passwordReset: createRateLimiterMiddleware({
     keyPrefix: 'password_reset',
-    points: 3,
-    duration: 3600,
-    blockDuration: 3600,
+    points: parseInt(process.env.PASSWORD_RESET_RATE_LIMIT, 10) || 3,
+    duration: parseInt(process.env.PASSWORD_RESET_RATE_WINDOW, 10) || 3600,
+    blockDuration: parseInt(process.env.PASSWORD_RESET_BLOCK_DURATION, 10) || 3600,
     identifierType: 'ip',
   }),
 
@@ -407,8 +419,8 @@ const rateLimiters_presets = {
    */
   email: createRateLimiterMiddleware({
     keyPrefix: 'email',
-    points: 10,
-    duration: 3600,
+    points: parseInt(process.env.EMAIL_RATE_LIMIT, 10) || 10,
+    duration: parseInt(process.env.EMAIL_RATE_WINDOW, 10) || 3600,
     identifierType: 'ip',
   }),
 
@@ -419,8 +431,8 @@ const rateLimiters_presets = {
    */
   apiKey: createRateLimiterMiddleware({
     keyPrefix: 'apikey',
-    points: 1000,
-    duration: 3600,
+    points: parseInt(process.env.APIKEY_RATE_LIMIT, 10) || 1000,
+    duration: parseInt(process.env.APIKEY_RATE_WINDOW, 10) || 3600,
     identifierType: 'apiKey',
   }),
 };
