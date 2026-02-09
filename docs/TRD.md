@@ -2163,7 +2163,7 @@ export REDIS_FAILURE_MODE=closed
 ### Authentication & Authorization
 - [x] JWT uses RS256 algorithm
 - [x] Token expiration is configured (1 hour max)
-- [ ] Refresh token rotation is enabled
+- [x] Refresh token rotation is enabled
 - [ ] Password requirements enforced (12+ chars, complexity)
 - [ ] Account lockout after failed attempts
 - [ ] RBAC is properly configured
