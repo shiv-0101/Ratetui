@@ -2161,7 +2161,7 @@ export REDIS_FAILURE_MODE=closed
 ## Pre-Deployment Security Checklist
 
 ### Authentication & Authorization
-- [ ] JWT uses RS256 algorithm
+- [x] JWT uses RS256 algorithm
 - [ ] Token expiration is configured (1 hour max)
 - [ ] Refresh token rotation is enabled
 - [ ] Password requirements enforced (12+ chars, complexity)
