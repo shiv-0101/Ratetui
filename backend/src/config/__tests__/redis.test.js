@@ -11,7 +11,10 @@ const {
   getConnectionStatus,
   pingRedis,
   shouldAllowRequests,
-} = require('../../config/redis');
+  validateRedisConfig,
+  testRedisConnection,
+  testFailureMode,
+} = require('../redis');
 
 // Mock the Redis client
 jest.mock('redis', () => ({
@@ -207,6 +210,65 @@ describe('Redis Connection Module', () => {
       if (!result.success) {
         expect(result).toHaveProperty('error');
         expect(typeof result.error).toBe('string');
+      }
+    });
+  });
+
+  describe('Configuration Validation', () => {
+    test('should validate redis host is present', () => {
+      const originalHost = process.env.REDIS_HOST;
+      delete process.env.REDIS_HOST;
+      
+      const validation = validateRedisConfig();
+      expect(validation.valid).toBe(false);
+      expect(validation.errors.length).toBeGreaterThan(0);
+      
+      process.env.REDIS_HOST = originalHost;
+    });
+
+    test('should validate redis port is valid', () => {
+      const originalPort = process.env.REDIS_PORT;
+      process.env.REDIS_PORT = 'invalid';
+      
+      const validation = validateRedisConfig();
+      expect(validation.valid).toBe(false);
+      
+      process.env.REDIS_PORT = originalPort;
+    });
+
+    test('should validate redis database number', () => {
+      const originalDb = process.env.REDIS_DB;
+      process.env.REDIS_DB = '20';
+      
+      const validation = validateRedisConfig();
+      expect(validation.valid).toBe(false);
+      
+      process.env.REDIS_DB = originalDb;
+    });
+
+    test('should pass validation with correct config', () => {
+      process.env.REDIS_HOST = 'localhost';
+      process.env.REDIS_PORT = '6379';
+      process.env.REDIS_DB = '0';
+      
+      const validation = validateRedisConfig();
+      expect(validation.valid).toBe(true);
+      expect(validation.errors.length).toBe(0);
+    });
+  });
+
+  describe('Connection Testing', () => {
+    test('should test redis connection with validation', async () => {
+      const result = await testRedisConnection();
+      expect(result).toHaveProperty('configValid');
+      expect(result).toHaveProperty('connectionSuccessful');
+      expect(result).toHaveProperty('pingSuccessful');
+    });
+
+    test('should measure connection latency', async () => {
+      const result = await testRedisConnection();
+      if (result.pingSuccessful) {
+        expect(result.latency).toBeGreaterThanOrEqual(0);
       }
     });
   });
