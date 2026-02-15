@@ -3,6 +3,7 @@
  * 
  * Implements rate limiting using rate-limiter-flexible with Redis backend.
  * Supports multiple limiting strategies: by IP, user, and endpoint.
+ * Dynamically loads and applies rules from Redis.
  */
 
 const { RateLimiterRedis, RateLimiterMemory } = require('rate-limiter-flexible');
@@ -15,6 +16,196 @@ const rateLimiters = new Map();
 
 // Fallback in-memory limiter for when Redis is unavailable
 let memoryLimiter = null;
+
+// Cache for dynamic rules
+let rulesCache = null;
+let rulesCacheExpiry = 0;
+const RULES_CACHE_TTL = 60000; // 60 seconds
+
+/**
+ * Load dynamic rules from Redis with caching
+ * @returns {Promise<Array>} Array of enabled rules sorted by priority
+ */
+const loadDynamicRules = async () => {
+  // Return cached rules if still valid
+  if (rulesCache && Date.now() < rulesCacheExpiry) {
+    return rulesCache;
+  }
+
+  if (!isRedisConnected()) {
+    logger.debug('Redis unavailable, cannot load dynamic rules');
+    return [];
+  }
+
+  try {
+    const redis = getRedisClient();
+    
+    // Get all rule IDs sorted by priority (descending)
+    const ruleIds = await redis.zrevrange('rl:rules:priority', 0, -1);
+    
+    if (!ruleIds || ruleIds.length === 0) {
+      rulesCache = [];
+      rulesCacheExpiry = Date.now() + RULES_CACHE_TTL;
+      return [];
+    }
+
+    // Load each rule
+    const rules = [];
+    for (const ruleId of ruleIds) {
+      const ruleData = await redis.hgetall(`rl:rule:${ruleId}`);
+      
+      if (ruleData && Object.keys(ruleData).length > 0) {
+        // Parse and filter enabled rules only
+        if (ruleData.enabled === 'true') {
+          rules.push({
+            ...ruleData,
+            target: JSON.parse(ruleData.target),
+            limit: JSON.parse(ruleData.limit),
+            priority: parseInt(ruleData.priority),
+          });
+        }
+      }
+    }
+
+    // Cache the rules
+    rulesCache = rules;
+    rulesCacheExpiry = Date.now() + RULES_CACHE_TTL;
+
+    logger.debug('Dynamic rules loaded', { count: rules.length });
+    return rules;
+  } catch (error) {
+    logger.error('Failed to load dynamic rules', { error: error.message });
+    return rulesCache || [];
+  }
+};
+
+/**
+ * Match request against a rule pattern
+ * @param {Object} req - Express request
+ * @param {Object} rule - Rule to match against
+ * @returns {boolean} True if request matches rule
+ */
+const matchesRule = (req, rule) => {
+  const { target } = rule;
+
+  switch (target.type) {
+  case 'endpoint': {
+    const requestPath = `${req.method}:${req.baseUrl}${req.path}`;
+    const pattern = target.pattern;
+
+    // Exact match
+    if (pattern === requestPath) {
+      return true;
+    }
+
+    // Wildcard matching
+    if (pattern.includes('*')) {
+      const regexPattern = '^' + pattern
+        .replace(/\*/g, '.*')
+        .replace(/\//g, '\\/');
+      const regex = new RegExp(regexPattern);
+      return regex.test(requestPath);
+    }
+
+    // Prefix matching without method
+    if (requestPath.includes(pattern)) {
+      return true;
+    }
+
+    return false;
+  }
+
+  case 'ip': {
+    const clientIP = extractClientIP(req);
+    const pattern = target.pattern;
+
+    // Exact IP match
+    if (pattern === clientIP) {
+      return true;
+    }
+
+    // CIDR or wildcard matching (basic)
+    if (pattern.includes('*')) {
+      const regexPattern = '^' + pattern.replace(/\*/g, '.*') + '$';
+      const regex = new RegExp(regexPattern);
+      return regex.test(clientIP);
+    }
+
+    return false;
+  }
+
+  case 'user': {
+    const userId = req.user?.id || null;
+    if (!userId) return false;
+
+    const pattern = target.pattern;
+    return pattern === userId || pattern === '*';
+  }
+
+  case 'apikey': {
+    const apiKey = req.headers['x-api-key'] || null;
+    if (!apiKey) return false;
+
+    const pattern = target.pattern;
+    return pattern === apiKey || pattern === '*';
+  }
+
+  default:
+    return false;
+  }
+};
+
+/**
+ * Find the highest priority matching rule for a request
+ * @param {Object} req - Express request
+ * @returns {Promise<Object|null>} Matching rule or null
+ */
+const findMatchingRule = async (req) => {
+  const rules = await loadDynamicRules();
+
+  // Rules are already sorted by priority (descending)
+  for (const rule of rules) {
+    if (matchesRule(req, rule)) {
+      logger.debug('Request matched dynamic rule', {
+        ruleId: rule.id,
+        ruleName: rule.name,
+        priority: rule.priority,
+        path: req.path,
+      });
+      return rule;
+    }
+  }
+
+  return null;
+};
+
+/**
+ * Convert time window string to seconds
+ * @param {string} window - Time window (e.g., '1m', '1h', '1d')
+ * @returns {number} Duration in seconds
+ */
+const parseTimeWindow = (window) => {
+  const match = window.match(/^(\d+)(s|m|h|d)$/);
+  if (!match) {
+    logger.warn('Invalid time window format', { window });
+    return 60; // Default to 60 seconds
+  }
+
+  const value = parseInt(match[1]);
+  const unit = match[2];
+  const multipliers = { s: 1, m: 60, h: 3600, d: 86400 };
+
+  return value * (multipliers[unit] || 60);
+};
+
+/**
+ * Clear rules cache (called when rules are modified)
+ */
+const clearRulesCache = () => {
+  rulesCache = null;
+  rulesCacheExpiry = 0;
+  logger.debug('Rules cache cleared');
+};
 
 /**
  * Get or create a rate limiter for specific configuration
@@ -209,6 +400,7 @@ const createRateLimiterMiddleware = (options = {}) => {
     identifierType: options.identifierType || 'ip', // 'ip', 'user', 'apiKey'
     skipFailedRequests: options.skipFailedRequests || false,
     customKeyGenerator: options.customKeyGenerator || null,
+    useDynamicRules: options.useDynamicRules !== false, // Enable by default
   };
 
   return async (req, res, next) => {
@@ -224,12 +416,49 @@ const createRateLimiterMiddleware = (options = {}) => {
         
         // Open mode - log warning but allow request
         logger.warn('Redis unavailable, allowing request (open mode)');
+        return next();
+      }
+
+      // Check for dynamic rules first (if enabled)
+      let activeConfig = config;
+      if (config.useDynamicRules) {
+        const matchingRule = await findMatchingRule(req);
+        
+        if (matchingRule) {
+          // Override config with dynamic rule
+          const duration = parseTimeWindow(matchingRule.limit.window);
+          activeConfig = {
+            ...config,
+            keyPrefix: `rule:${matchingRule.id}`,
+            points: matchingRule.limit.requests,
+            duration: duration,
+            blockDuration: config.blockDuration,
+          };
+
+          logger.debug('Applying dynamic rule', {
+            ruleId: matchingRule.id,
+            ruleName: matchingRule.name,
+            limit: matchingRule.limit.requests,
+            window: matchingRule.limit.window,
+          });
+
+          // If action is 'log', just log and allow
+          if (matchingRule.action === 'log') {
+            logger.info('Rate limit logged (not enforced)', {
+              ruleId: matchingRule.id,
+              ruleName: matchingRule.name,
+              identifier: getClientIdentifier(req, activeConfig.identifierType),
+              path: req.path,
+            });
+            return next();
+          }
+        }
       }
 
       // Get client identifier
-      const identifier = config.customKeyGenerator 
-        ? config.customKeyGenerator(req)
-        : getClientIdentifier(req, config.identifierType);
+      const identifier = activeConfig.customKeyGenerator 
+        ? activeConfig.customKeyGenerator(req)
+        : getClientIdentifier(req, activeConfig.identifierType);
 
       if (!identifier) {
         logger.warn('Could not determine client identifier');
@@ -242,13 +471,13 @@ const createRateLimiterMiddleware = (options = {}) => {
         : identifier;
 
       // Get rate limiter
-      const rateLimiter = getRateLimiter(config);
+      const rateLimiter = getRateLimiter(activeConfig);
 
       // Consume point (sliding window counter)
       const rateLimiterRes = await rateLimiter.consume(key);
 
       // Set comprehensive rate limit headers
-      setRateLimitHeaders(res, rateLimiterRes, config);
+      setRateLimitHeaders(res, rateLimiterRes, activeConfig);
 
       next();
     } catch (error) {
@@ -257,23 +486,26 @@ const createRateLimiterMiddleware = (options = {}) => {
         const retryAfter = Math.ceil(error.msBeforeNext / 1000);
         const resetTime = Math.ceil(Date.now() / 1000) + retryAfter;
         
+        // Use activeConfig if it exists, fallback to config
+        const limitConfig = error.activeConfig || config;
+        
         res.set({
-          'X-RateLimit-Limit': String(config.points),
+          'X-RateLimit-Limit': String(limitConfig.points),
           'X-RateLimit-Remaining': '0',
           'X-RateLimit-Reset': String(resetTime),
-          'X-RateLimit-Window': `${config.duration}s`,
+          'X-RateLimit-Window': `${limitConfig.duration}s`,
           'X-RateLimit-RetryAfter': String(retryAfter),
           'Retry-After': String(retryAfter),
         });
 
         logger.warn('Rate limit exceeded', {
-          identifier: getClientIdentifier(req, config.identifierType),
+          identifier: getClientIdentifier(req, limitConfig.identifierType),
           ip: extractClientIP(req),
           method: req.method,
           path: req.path,
           retryAfter,
-          limit: config.points,
-          window: config.duration,
+          limit: limitConfig.points,
+          window: limitConfig.duration,
         });
 
         return res.status(429).json({
@@ -282,9 +514,9 @@ const createRateLimiterMiddleware = (options = {}) => {
             message: `Too many requests. Please retry after ${retryAfter} seconds.`,
             retryAfter,
             retryAfterSeconds: retryAfter,
-            limit: config.points,
-            window: `${config.duration}s`,
-            windowSeconds: config.duration,
+            limit: limitConfig.points,
+            window: `${limitConfig.duration}s`,
+            windowSeconds: limitConfig.duration,
             resetAt: new Date(resetTime * 1000).toISOString(),
           }
         });
@@ -444,4 +676,8 @@ module.exports = {
   extractClientIP,
   isValidIP,
   setRateLimitHeaders,
+  loadDynamicRules,
+  findMatchingRule,
+  clearRulesCache,
+  parseTimeWindow,
 };

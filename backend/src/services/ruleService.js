@@ -9,6 +9,17 @@ const RateLimitRule = require('../models/RateLimitRule');
 const { getRedisClient, isRedisConnected } = require('../config/redis');
 const logger = require('../utils/logger');
 
+// Import clearRulesCache from rateLimiter (will be called when rules change)
+let clearRulesCache = null;
+
+// Lazy load to avoid circular dependency
+const getClearRulesCache = () => {
+  if (!clearRulesCache) {
+    clearRulesCache = require('../middleware/rateLimiter').clearRulesCache;
+  }
+  return clearRulesCache;
+};
+
 /**
  * Create a new rule with validation
  * 
@@ -30,6 +41,13 @@ const createRule = async (ruleData, actor) => {
 
   // Create the rule
   const rule = await RateLimitRule.createRule(ruleData);
+
+  // Clear rules cache so new rule is loaded
+  try {
+    getClearRulesCache()();
+  } catch (error) {
+    logger.warn('Failed to clear rules cache', { error: error.message });
+  }
 
   // Log audit trail
   await logAudit({
@@ -64,6 +82,13 @@ const updateRule = async (ruleId, updates, actor) => {
   // Update the rule
   const updatedRule = await RateLimitRule.updateRule(ruleId, updates);
 
+  // Clear rules cache so changes take effect
+  try {
+    getClearRulesCache()();
+  } catch (error) {
+    logger.warn('Failed to clear rules cache', { error: error.message });
+  }
+
   // Log audit trail
   await logAudit({
     action: 'update',
@@ -91,7 +116,14 @@ const deleteRule = async (ruleId, actor) => {
   // Get existing rule for audit
   const existingRule = await RateLimitRule.getRuleById(ruleId);
   if (!existingRule) {
-    throw new Error('Rule not found');
+    thrClear rules cache so deletion takes effect
+    try {
+      getClearRulesCache()();
+    } catch (error) {
+      logger.warn('Failed to clear rules cache', { error: error.message });
+    }
+
+    // ow new Error('Rule not found');
   }
 
   // Delete the rule
@@ -117,7 +149,14 @@ const deleteRule = async (ruleId, actor) => {
 /**
  * Enable a rule
  * 
- * @param {string} ruleId - Rule ID
+ *// Clear rules cache
+  try {
+    getClearRulesCache()();
+  } catch (error) {
+    logger.warn('Failed to clear rules cache', { error: error.message });
+  }
+
+   @param {string} ruleId - Rule ID
  * @param {Object} actor - User performing the action
  * @returns {Promise<Object>} Updated rule
  */
@@ -133,7 +172,14 @@ const enableRule = async (ruleId, actor) => {
   });
 
   logger.info('Rule enabled via service', { ruleId, actor: actor.id });
+// Clear rules cache
+  try {
+    getClearRulesCache()();
+  } catch (error) {
+    logger.warn('Failed to clear rules cache', { error: error.message });
+  }
 
+  
   return rule;
 };
 
