@@ -49,6 +49,11 @@ router.get('/info', (req, res) => {
           delete: 'DELETE /admin/rules/:id',
           enable: 'POST /admin/rules/:id/enable',
           disable: 'POST /admin/rules/:id/disable',
+          audit: 'GET /admin/rules/:id/audit',
+        },
+        audit: {
+          list: 'GET /admin/audit',
+          byRule: 'GET /admin/rules/:id/audit',
         },
         coming_soon: {
           auth: '/admin/auth/* (Week 2)',
@@ -248,6 +253,81 @@ router.post('/rules/:id/disable', mockAuth, async (req, res, next) => {
     }
     logger.error('Failed to disable rule', { ruleId: req.params.id, error: error.message });
     next(createError('INTERNAL_ERROR', 'Failed to disable rule'));
+  }
+});
+
+/**
+ * Get audit log for a specific date
+ * GET /admin/audit
+ * Query params: date (YYYY-MM-DD, defaults to today), limit (default 100)
+ */
+router.get('/audit', mockAuth, async (req, res, next) => {
+  try {
+    const date = req.query.date || new Date().toISOString().split('T')[0];
+    const limit = parseInt(req.query.limit) || 100;
+
+    // Validate date format
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      return next(createError('VALIDATION_ERROR', 'Invalid date format. Use YYYY-MM-DD'));
+    }
+
+    const entries = await ruleService.getAuditLog(date, limit);
+
+    logger.info('Audit log retrieved', { date, count: entries.length, user: req.user.id });
+
+    res.json({
+      success: true,
+      data: {
+        entries,
+        count: entries.length,
+        date,
+        limit,
+      }
+    });
+  } catch (error) {
+    logger.error('Failed to retrieve audit log', { error: error.message });
+    next(createError('INTERNAL_ERROR', 'Failed to retrieve audit log'));
+  }
+});
+
+/**
+ * Get audit log for a specific rule
+ * GET /admin/rules/:id/audit
+ * Query params: days (default 7)
+ */
+router.get('/rules/:id/audit', mockAuth, async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const days = parseInt(req.query.days) || 7;
+
+    if (days < 1 || days > 90) {
+      return next(createError('VALIDATION_ERROR', 'Days must be between 1 and 90'));
+    }
+
+    const entries = await ruleService.getRuleAuditLog(id, days);
+
+    logger.info('Rule audit log retrieved', { 
+      ruleId: id, 
+      count: entries.length, 
+      days,
+      user: req.user.id 
+    });
+
+    res.json({
+      success: true,
+      data: {
+        ruleId: id,
+        entries,
+        count: entries.length,
+        days,
+      }
+    });
+  } catch (error) {
+    logger.error('Failed to retrieve rule audit log', { 
+      ruleId: req.params.id, 
+      error: error.message 
+    });
+    next(createError('INTERNAL_ERROR', 'Failed to retrieve rule audit log'));
   }
 });
 
