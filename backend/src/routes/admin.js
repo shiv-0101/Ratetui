@@ -6,9 +6,13 @@
  */
 
 const express = require('express');
+const { body, validationResult } = require('express-validator');
 const { rateLimiters } = require('../middleware/rateLimiter');
 const { ruleValidationRules, validate } = require('../validators/ruleValidator');
 const ruleService = require('../services/ruleService');
+const ipManagement = require('../services/ipManagement');
+const metricsService = require('../services/metricsService');
+const { getRequestStats, resetRequestStats } = require('../middleware/requestTracker');
 const { createError } = require('../middleware/errorHandler');
 const logger = require('../utils/logger');
 
@@ -332,33 +336,477 @@ router.get('/rules/:id/audit', mockAuth, async (req, res, next) => {
 });
 
 /**
- * Get blocked IPs (placeholder for Week 2)
+ * Get blocked IPs
  * GET /admin/ip/blocked
+ * Query params: limit, offset
  */
-router.get('/ip/blocked', mockAuth, (req, res) => {
-  res.json({
-    success: true,
-    data: {
-      blocked: [],
-      message: 'IP management coming in Week 2',
-    }
-  });
+router.get('/ip/blocked', mockAuth, async (req, res, next) => {
+  try {
+    const limit = parseInt(req.query.limit) || 100;
+    const offset = parseInt(req.query.offset) || 0;
+
+    const blacklistedIPs = await ipManagement.getBlacklistedIPs({ limit, offset });
+    const stats = await ipManagement.getIPStats();
+
+    logger.info('Blacklisted IPs retrieved', { 
+      count: blacklistedIPs.length, 
+      user: req.user.id 
+    });
+
+    res.json({
+      success: true,
+      data: {
+        blacklisted: blacklistedIPs,
+        count: blacklistedIPs.length,
+        total: stats.blacklisted,
+        limit,
+        offset,
+      }
+    });
+  } catch (error) {
+    logger.error('Failed to retrieve blacklisted IPs', { error: error.message });
+    next(createError('INTERNAL_ERROR', 'Failed to retrieve blacklisted IPs'));
+  }
 });
 
 /**
- * Get metrics (placeholder for Week 3)
+ * Get whitelisted IPs
+ * GET /admin/ip/whitelisted
+ * Query params: limit, offset
+ */
+router.get('/ip/whitelisted', mockAuth, async (req, res, next) => {
+  try {
+    const limit = parseInt(req.query.limit) || 100;
+    const offset = parseInt(req.query.offset) || 0;
+
+    const whitelistedIPs = await ipManagement.getWhitelistedIPs({ limit, offset });
+    const stats = await ipManagement.getIPStats();
+
+    logger.info('Whitelisted IPs retrieved', { 
+      count: whitelistedIPs.length, 
+      user: req.user.id 
+    });
+
+    res.json({
+      success: true,
+      data: {
+        whitelisted: whitelistedIPs,
+        count: whitelistedIPs.length,
+        total: stats.whitelisted,
+        limit,
+        offset,
+      }
+    });
+  } catch (error) {
+    logger.error('Failed to retrieve whitelisted IPs', { error: error.message });
+    next(createError('INTERNAL_ERROR', 'Failed to retrieve whitelisted IPs'));
+  }
+});
+
+/**
+ * Check IP status
+ * GET /admin/ip/check/:ip
+ */
+router.get('/ip/check/:ip', mockAuth, async (req, res, next) => {
+  try {
+    const { ip } = req.params;
+
+    const blacklistEntry = await ipManagement.isIPBlacklisted(ip);
+    const whitelistEntry = await ipManagement.isIPWhitelisted(ip);
+
+    let status = 'normal';
+    if (blacklistEntry) status = 'blacklisted';
+    if (whitelistEntry) status = 'whitelisted';
+
+    res.json({
+      success: true,
+      data: {
+        ip,
+        status,
+        blacklist: blacklistEntry,
+        whitelist: whitelistEntry,
+      }
+    });
+  } catch (error) {
+    logger.error('Failed to check IP status', { ip: req.params.ip, error: error.message });
+    next(createError('INTERNAL_ERROR', 'Failed to check IP status'));
+  }
+});
+
+/**
+ * Blacklist an IP
+ * POST /admin/ip/blacklist
+ * Body: { ip, duration, reason }
+ */
+router.post('/ip/blacklist', mockAuth, [
+  body('ip').notEmpty().withMessage('IP address is required')
+    .matches(/^(\d{1,3}\.){3}\d{1,3}$/).withMessage('Invalid IP address format'),
+  body('duration').optional().isInt({ min: 0 }).withMessage('Duration must be a positive integer'),
+  body('reason').optional().isString().withMessage('Reason must be a string'),
+], async (req, res, next) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return next(createError('VALIDATION_ERROR', 'Invalid input', { errors: errors.array() }));
+    }
+
+    const { ip, duration = 0, reason = '' } = req.body;
+
+    const entry = await ipManagement.blacklistIP(ip, duration, reason, req.user);
+
+    logger.info('IP blacklisted', { ip, duration, user: req.user.id });
+
+    res.status(201).json({
+      success: true,
+      data: { entry },
+      message: `IP ${ip} blacklisted successfully`
+    });
+  } catch (error) {
+    logger.error('Failed to blacklist IP', { error: error.message });
+    next(createError('INTERNAL_ERROR', error.message || 'Failed to blacklist IP'));
+  }
+});
+
+/**
+ * Unblacklist an IP
+ * DELETE /admin/ip/blacklist/:ip
+ */
+router.delete('/ip/blacklist/:ip', mockAuth, async (req, res, next) => {
+  try {
+    const { ip } = req.params;
+
+    await ipManagement.unblacklistIP(ip, req.user);
+
+    logger.info('IP unblacklisted', { ip, user: req.user.id });
+
+    res.json({
+      success: true,
+      message: `IP ${ip} removed from blacklist`
+    });
+  } catch (error) {
+    logger.error('Failed to unblacklist IP', { ip: req.params.ip, error: error.message });
+    next(createError('INTERNAL_ERROR', 'Failed to unblacklist IP'));
+  }
+});
+
+/**
+ * Whitelist an IP
+ * POST /admin/ip/whitelist
+ * Body: { ip, reason }
+ */
+router.post('/ip/whitelist', mockAuth, [
+  body('ip').notEmpty().withMessage('IP address is required')
+    .matches(/^(\d{1,3}\.){3}\d{1,3}$/).withMessage('Invalid IP address format'),
+  body('reason').optional().isString().withMessage('Reason must be a string'),
+], async (req, res, next) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return next(createError('VALIDATION_ERROR', 'Invalid input', { errors: errors.array() }));
+    }
+
+    const { ip, reason = '' } = req.body;
+
+    const entry = await ipManagement.whitelistIP(ip, reason, req.user);
+
+    logger.info('IP whitelisted', { ip, user: req.user.id });
+
+    res.status(201).json({
+      success: true,
+      data: { entry },
+      message: `IP ${ip} whitelisted successfully`
+    });
+  } catch (error) {
+    logger.error('Failed to whitelist IP', { error: error.message });
+    next(createError('INTERNAL_ERROR', error.message || 'Failed to whitelist IP'));
+  }
+});
+
+/**
+ * Remove IP from whitelist
+ * DELETE /admin/ip/whitelist/:ip
+ */
+router.delete('/ip/whitelist/:ip', mockAuth, async (req, res, next) => {
+  try {
+    const { ip } = req.params;
+
+    await ipManagement.unwhitelistIP(ip, req.user);
+
+    logger.info('IP removed from whitelist', { ip, user: req.user.id });
+
+    res.json({
+      success: true,
+      message: `IP ${ip} removed from whitelist`
+    });
+  } catch (error) {
+    logger.error('Failed to remove IP from whitelist', { ip: req.params.ip, error: error.message });
+    next(createError('INTERNAL_ERROR', 'Failed to remove IP from whitelist'));
+  }
+});
+
+/**
+ * Get IP statistics
+ * GET /admin/ip/stats
+ */
+router.get('/ip/stats', mockAuth, async (req, res, next) => {
+  try {
+    const stats = await ipManagement.getIPStats();
+
+    res.json({
+      success: true,
+      data: { stats }
+    });
+  } catch (error) {
+    logger.error('Failed to get IP stats', { error: error.message });
+    next(createError('INTERNAL_ERROR', 'Failed to get IP statistics'));
+  }
+});
+
+/**
+ * Get comprehensive metrics
  * GET /admin/metrics
  */
-router.get('/metrics', mockAuth, (req, res) => {
-  res.json({
-    success: true,
-    data: {
-      totalRequests: 0,
-      blockedRequests: 0,
-      activeRules: 0,
-      message: 'Metrics coming in Week 3',
+router.get('/metrics', mockAuth, async (req, res, next) => {
+  try {
+    const summary = await metricsService.getMetricsSummary();
+
+    res.json({
+      success: true,
+      data: summary
+    });
+  } catch (error) {
+    logger.error('Failed to get metrics summary', { error: error.message });
+    next(createError('INTERNAL_ERROR', 'Failed to retrieve metrics'));
+  }
+});
+
+/**
+ * Get global metrics
+ * GET /admin/metrics/global
+ */
+router.get('/metrics/global', mockAuth, async (req, res, next) => {
+  try {
+    const metrics = await metricsService.getGlobalMetrics();
+
+    res.json({
+      success: true,
+      data: metrics
+    });
+  } catch (error) {
+    logger.error('Failed to get global metrics', { error: error.message });
+    next(createError('INTERNAL_ERROR', 'Failed to retrieve global metrics'));
+  }
+});
+
+/**
+ * Get time-series metrics
+ * GET /admin/metrics/timeseries
+ * Query params: period (hour|day), count
+ */
+router.get('/metrics/timeseries', mockAuth, async (req, res, next) => {
+  try {
+    const period = req.query.period || 'hour';
+    const count = parseInt(req.query.count) || (period === 'hour' ? 24 : 7);
+
+    if (!['hour', 'day'].includes(period)) {
+      return next(createError('VALIDATION_ERROR', 'Period must be hour or day'));
     }
-  });
+
+    const metrics = await metricsService.getTimeSeriesMetrics(period, count);
+
+    res.json({
+      success: true,
+      data: {
+        period,
+        count,
+        metrics
+      }
+    });
+  } catch (error) {
+    logger.error('Failed to get time-series metrics', { error: error.message });
+    next(createError('INTERNAL_ERROR', 'Failed to retrieve time-series metrics'));
+  }
+});
+
+/**
+ * Get endpoint metrics
+ * GET /admin/metrics/endpoint/:endpoint
+ */
+router.get('/metrics/endpoint/:endpoint(*)', mockAuth, async (req, res, next) => {
+  try {
+    const endpoint = '/' + req.params.endpoint;
+    const metrics = await metricsService.getEndpointMetrics(endpoint);
+
+    res.json({
+      success: true,
+      data: metrics
+    });
+  } catch (error) {
+    logger.error('Failed to get endpoint metrics', { error: error.message });
+    next(createError('INTERNAL_ERROR', 'Failed to retrieve endpoint metrics'));
+  }
+});
+
+/**
+ * Get top endpoints
+ * GET /admin/metrics/top/endpoints
+ * Query params: limit
+ */
+router.get('/metrics/top/endpoints', mockAuth, async (req, res, next) => {
+  try {
+    const limit = parseInt(req.query.limit) || 10;
+    const endpoints = await metricsService.getTopEndpoints(limit);
+
+    res.json({
+      success: true,
+      data: {
+        endpoints,
+        count: endpoints.length,
+        limit
+      }
+    });
+  } catch (error) {
+    logger.error('Failed to get top endpoints', { error: error.message });
+    next(createError('INTERNAL_ERROR', 'Failed to retrieve top endpoints'));
+  }
+});
+
+/**
+ * Get IP metrics
+ * GET /admin/metrics/ip/:ip
+ */
+router.get('/metrics/ip/:ip', mockAuth, async (req, res, next) => {
+  try {
+    const { ip } = req.params;
+    const metrics = await metricsService.getIPMetrics(ip);
+
+    res.json({
+      success: true,
+      data: metrics
+    });
+  } catch (error) {
+    logger.error('Failed to get IP metrics', { error: error.message });
+    next(createError('INTERNAL_ERROR', 'Failed to retrieve IP metrics'));
+  }
+});
+
+/**
+ * Get top IPs
+ * GET /admin/metrics/top/ips
+ * Query params: limit
+ */
+router.get('/metrics/top/ips', mockAuth, async (req, res, next) => {
+  try {
+    const limit = parseInt(req.query.limit) || 10;
+    const ips = await metricsService.getTopIPs(limit);
+
+    res.json({
+      success: true,
+      data: {
+        ips,
+        count: ips.length,
+        limit
+      }
+    });
+  } catch (error) {
+    logger.error('Failed to get top IPs', { error: error.message });
+    next(createError('INTERNAL_ERROR', 'Failed to retrieve top IPs'));
+  }
+});
+
+/**
+ * Get rule metrics
+ * GET /admin/metrics/rule/:ruleId
+ */
+router.get('/metrics/rule/:ruleId', mockAuth, async (req, res, next) => {
+  try {
+    const { ruleId } = req.params;
+    const metrics = await metricsService.getRuleMetrics(ruleId);
+
+    res.json({
+      success: true,
+      data: metrics
+    });
+  } catch (error) {
+    logger.error('Failed to get rule metrics', { error: error.message });
+    next(createError('INTERNAL_ERROR', 'Failed to retrieve rule metrics'));
+  }
+});
+
+/**
+ * Get performance metrics
+ * GET /admin/metrics/performance
+ */
+router.get('/metrics/performance', mockAuth, async (req, res, next) => {
+  try {
+    const percentiles = await metricsService.getResponseTimePercentiles();
+
+    res.json({
+      success: true,
+      data: percentiles
+    });
+  } catch (error) {
+    logger.error('Failed to get performance metrics', { error: error.message });
+    next(createError('INTERNAL_ERROR', 'Failed to retrieve performance metrics'));
+  }
+});
+
+/**
+ * Reset metrics
+ * POST /admin/metrics/reset
+ */
+router.post('/metrics/reset', mockAuth, async (req, res, next) => {
+  try {
+    await metricsService.resetMetrics();
+
+    logger.warn('Metrics reset', { user: req.user.id });
+
+    res.json({
+      success: true,
+      message: 'All metrics have been reset'
+    });
+  } catch (error) {
+    logger.error('Failed to reset metrics', { error: error.message });
+    next(createError('INTERNAL_ERROR', 'Failed to reset metrics'));
+  }
+});
+
+/**
+ * Get real-time request statistics
+ * GET /admin/stats/requests
+ */
+router.get('/stats/requests', mockAuth, (req, res, next) => {
+  try {
+    const stats = getRequestStats();
+
+    res.json({
+      success: true,
+      data: stats
+    });
+  } catch (error) {
+    logger.error('Failed to get request stats', { error: error.message });
+    next(createError('INTERNAL_ERROR', 'Failed to retrieve request statistics'));
+  }
+});
+
+/**
+ * Reset request statistics
+ * POST /admin/stats/requests/reset
+ */
+router.post('/stats/requests/reset', mockAuth, (req, res, next) => {
+  try {
+    resetRequestStats();
+
+    logger.warn('Request stats reset', { user: req.user.id });
+
+    res.json({
+      success: true,
+      message: 'Request statistics have been reset'
+    });
+  } catch (error) {
+    logger.error('Failed to reset request stats', { error: error.message });
+    next(createError('INTERNAL_ERROR', 'Failed to reset request statistics'));
+  }
 });
 
 module.exports = router;
