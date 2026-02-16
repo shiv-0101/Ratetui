@@ -21,6 +21,10 @@ const {
   logSlowRequest,
   requestTimeout,
 } = require('./middleware/requestLogger');
+const { 
+  requestTrackerWithIPCheck, 
+  requestStatsTracker 
+} = require('./middleware/requestTracker');
 
 // Import routes
 const healthRoutes = require('./routes/health');
@@ -90,6 +94,14 @@ if (process.env.NODE_ENV !== 'test') {
   app.use(morganMiddleware);
   app.use(logSlowRequest);
 }
+
+// ===========================================
+// Request Tracking & Metrics
+// ===========================================
+
+// Track requests for metrics and IP checks
+app.use(requestTrackerWithIPCheck);
+app.use(requestStatsTracker);
 
 // ===========================================
 // Routes
