@@ -7,6 +7,8 @@
 
 const express = require('express');
 const { body, validationResult } = require('express-validator');
+const { authenticate } = require('../middleware/auth');
+const { requireAdmin, requirePermission } = require('../middleware/authorize');
 const { rateLimiters } = require('../middleware/rateLimiter');
 const { ruleValidationRules, validate } = require('../validators/ruleValidator');
 const ruleService = require('../services/ruleService');
@@ -18,21 +20,12 @@ const logger = require('../utils/logger');
 
 const router = express.Router();
 
+// Apply authentication and admin authorization to all admin routes
+router.use(authenticate);
+router.use(requireAdmin());
+
 // Apply admin rate limiting
 router.use(rateLimiters.admin);
-
-/**
- * Mock authentication middleware (will be replaced with real auth in Week 2)
- * For now, inject a mock admin user for testing
- */
-const mockAuth = (req, res, next) => {
-  req.user = {
-    id: 'admin-001',
-    email: 'admin@example.com',
-    role: 'admin',
-  };
-  next();
-};
 
 /**
  * Admin dashboard info
@@ -74,7 +67,7 @@ router.get('/info', (req, res) => {
  * GET /admin/rules
  * Query params: enabled (true/false), sort (priority/name/created)
  */
-router.get('/rules', mockAuth, async (req, res, next) => {
+router.get('/rules', async (req, res, next) => {
   try {
     const { enabled, sort = 'priority' } = req.query;
     
@@ -112,7 +105,7 @@ router.get('/rules', mockAuth, async (req, res, next) => {
  * Get a single rule by ID
  * GET /admin/rules/:id
  */
-router.get('/rules/:id', mockAuth, async (req, res, next) => {
+router.get('/rules/:id', async (req, res, next) => {
   try {
     const { id } = req.params;
     const rule = await ruleService.getRule(id);
@@ -137,7 +130,7 @@ router.get('/rules/:id', mockAuth, async (req, res, next) => {
  * Create a new rate limit rule
  * POST /admin/rules
  */
-router.post('/rules', mockAuth, ruleValidationRules(), validate, async (req, res, next) => {
+router.post('/rules', ruleValidationRules(), validate, async (req, res, next) => {
   try {
     const rule = await ruleService.createRule(req.body, req.user);
 
@@ -161,7 +154,7 @@ router.post('/rules', mockAuth, ruleValidationRules(), validate, async (req, res
  * Update an existing rule
  * PUT /admin/rules/:id
  */
-router.put('/rules/:id', mockAuth, ruleValidationRules(), validate, async (req, res, next) => {
+router.put('/rules/:id', ruleValidationRules(), validate, async (req, res, next) => {
   try {
     const { id } = req.params;
     const rule = await ruleService.updateRule(id, req.body, req.user);
@@ -186,7 +179,7 @@ router.put('/rules/:id', mockAuth, ruleValidationRules(), validate, async (req, 
  * Delete a rule
  * DELETE /admin/rules/:id
  */
-router.delete('/rules/:id', mockAuth, async (req, res, next) => {
+router.delete('/rules/:id', async (req, res, next) => {
   try {
     const { id } = req.params;
     const success = await ruleService.deleteRule(id, req.user);
@@ -214,7 +207,7 @@ router.delete('/rules/:id', mockAuth, async (req, res, next) => {
  * Enable a rule
  * POST /admin/rules/:id/enable
  */
-router.post('/rules/:id/enable', mockAuth, async (req, res, next) => {
+router.post('/rules/:id/enable', async (req, res, next) => {
   try {
     const { id } = req.params;
     const rule = await ruleService.enableRule(id, req.user);
@@ -239,7 +232,7 @@ router.post('/rules/:id/enable', mockAuth, async (req, res, next) => {
  * Disable a rule
  * POST /admin/rules/:id/disable
  */
-router.post('/rules/:id/disable', mockAuth, async (req, res, next) => {
+router.post('/rules/:id/disable', async (req, res, next) => {
   try {
     const { id } = req.params;
     const rule = await ruleService.disableRule(id, req.user);
@@ -265,7 +258,7 @@ router.post('/rules/:id/disable', mockAuth, async (req, res, next) => {
  * GET /admin/audit
  * Query params: date (YYYY-MM-DD, defaults to today), limit (default 100)
  */
-router.get('/audit', mockAuth, async (req, res, next) => {
+router.get('/audit', async (req, res, next) => {
   try {
     const date = req.query.date || new Date().toISOString().split('T')[0];
     const limit = parseInt(req.query.limit) || 100;
@@ -299,7 +292,7 @@ router.get('/audit', mockAuth, async (req, res, next) => {
  * GET /admin/rules/:id/audit
  * Query params: days (default 7)
  */
-router.get('/rules/:id/audit', mockAuth, async (req, res, next) => {
+router.get('/rules/:id/audit', async (req, res, next) => {
   try {
     const { id } = req.params;
     const days = parseInt(req.query.days) || 7;
@@ -340,7 +333,7 @@ router.get('/rules/:id/audit', mockAuth, async (req, res, next) => {
  * GET /admin/ip/blocked
  * Query params: limit, offset
  */
-router.get('/ip/blocked', mockAuth, async (req, res, next) => {
+router.get('/ip/blocked', async (req, res, next) => {
   try {
     const limit = parseInt(req.query.limit) || 100;
     const offset = parseInt(req.query.offset) || 0;
@@ -374,7 +367,7 @@ router.get('/ip/blocked', mockAuth, async (req, res, next) => {
  * GET /admin/ip/whitelisted
  * Query params: limit, offset
  */
-router.get('/ip/whitelisted', mockAuth, async (req, res, next) => {
+router.get('/ip/whitelisted', async (req, res, next) => {
   try {
     const limit = parseInt(req.query.limit) || 100;
     const offset = parseInt(req.query.offset) || 0;
@@ -407,7 +400,7 @@ router.get('/ip/whitelisted', mockAuth, async (req, res, next) => {
  * Check IP status
  * GET /admin/ip/check/:ip
  */
-router.get('/ip/check/:ip', mockAuth, async (req, res, next) => {
+router.get('/ip/check/:ip', async (req, res, next) => {
   try {
     const { ip } = req.params;
 
@@ -438,7 +431,7 @@ router.get('/ip/check/:ip', mockAuth, async (req, res, next) => {
  * POST /admin/ip/blacklist
  * Body: { ip, duration, reason }
  */
-router.post('/ip/blacklist', mockAuth, [
+router.post('/ip/blacklist', [
   body('ip').notEmpty().withMessage('IP address is required')
     .matches(/^(\d{1,3}\.){3}\d{1,3}$/).withMessage('Invalid IP address format'),
   body('duration').optional().isInt({ min: 0 }).withMessage('Duration must be a positive integer'),
@@ -471,7 +464,7 @@ router.post('/ip/blacklist', mockAuth, [
  * Unblacklist an IP
  * DELETE /admin/ip/blacklist/:ip
  */
-router.delete('/ip/blacklist/:ip', mockAuth, async (req, res, next) => {
+router.delete('/ip/blacklist/:ip', async (req, res, next) => {
   try {
     const { ip } = req.params;
 
@@ -494,7 +487,7 @@ router.delete('/ip/blacklist/:ip', mockAuth, async (req, res, next) => {
  * POST /admin/ip/whitelist
  * Body: { ip, reason }
  */
-router.post('/ip/whitelist', mockAuth, [
+router.post('/ip/whitelist', [
   body('ip').notEmpty().withMessage('IP address is required')
     .matches(/^(\d{1,3}\.){3}\d{1,3}$/).withMessage('Invalid IP address format'),
   body('reason').optional().isString().withMessage('Reason must be a string'),
@@ -526,7 +519,7 @@ router.post('/ip/whitelist', mockAuth, [
  * Remove IP from whitelist
  * DELETE /admin/ip/whitelist/:ip
  */
-router.delete('/ip/whitelist/:ip', mockAuth, async (req, res, next) => {
+router.delete('/ip/whitelist/:ip', async (req, res, next) => {
   try {
     const { ip } = req.params;
 
@@ -548,7 +541,7 @@ router.delete('/ip/whitelist/:ip', mockAuth, async (req, res, next) => {
  * Get IP statistics
  * GET /admin/ip/stats
  */
-router.get('/ip/stats', mockAuth, async (req, res, next) => {
+router.get('/ip/stats', async (req, res, next) => {
   try {
     const stats = await ipManagement.getIPStats();
 
@@ -566,7 +559,7 @@ router.get('/ip/stats', mockAuth, async (req, res, next) => {
  * Get comprehensive metrics
  * GET /admin/metrics
  */
-router.get('/metrics', mockAuth, async (req, res, next) => {
+router.get('/metrics', async (req, res, next) => {
   try {
     const summary = await metricsService.getMetricsSummary();
 
@@ -584,7 +577,7 @@ router.get('/metrics', mockAuth, async (req, res, next) => {
  * Get global metrics
  * GET /admin/metrics/global
  */
-router.get('/metrics/global', mockAuth, async (req, res, next) => {
+router.get('/metrics/global', async (req, res, next) => {
   try {
     const metrics = await metricsService.getGlobalMetrics();
 
@@ -603,7 +596,7 @@ router.get('/metrics/global', mockAuth, async (req, res, next) => {
  * GET /admin/metrics/timeseries
  * Query params: period (hour|day), count
  */
-router.get('/metrics/timeseries', mockAuth, async (req, res, next) => {
+router.get('/metrics/timeseries', async (req, res, next) => {
   try {
     const period = req.query.period || 'hour';
     const count = parseInt(req.query.count) || (period === 'hour' ? 24 : 7);
@@ -632,7 +625,7 @@ router.get('/metrics/timeseries', mockAuth, async (req, res, next) => {
  * Get endpoint metrics
  * GET /admin/metrics/endpoint/:endpoint
  */
-router.get('/metrics/endpoint/:endpoint(*)', mockAuth, async (req, res, next) => {
+router.get('/metrics/endpoint/:endpoint(*)', async (req, res, next) => {
   try {
     const endpoint = '/' + req.params.endpoint;
     const metrics = await metricsService.getEndpointMetrics(endpoint);
@@ -652,7 +645,7 @@ router.get('/metrics/endpoint/:endpoint(*)', mockAuth, async (req, res, next) =>
  * GET /admin/metrics/top/endpoints
  * Query params: limit
  */
-router.get('/metrics/top/endpoints', mockAuth, async (req, res, next) => {
+router.get('/metrics/top/endpoints', async (req, res, next) => {
   try {
     const limit = parseInt(req.query.limit) || 10;
     const endpoints = await metricsService.getTopEndpoints(limit);
@@ -675,7 +668,7 @@ router.get('/metrics/top/endpoints', mockAuth, async (req, res, next) => {
  * Get IP metrics
  * GET /admin/metrics/ip/:ip
  */
-router.get('/metrics/ip/:ip', mockAuth, async (req, res, next) => {
+router.get('/metrics/ip/:ip', async (req, res, next) => {
   try {
     const { ip } = req.params;
     const metrics = await metricsService.getIPMetrics(ip);
@@ -695,7 +688,7 @@ router.get('/metrics/ip/:ip', mockAuth, async (req, res, next) => {
  * GET /admin/metrics/top/ips
  * Query params: limit
  */
-router.get('/metrics/top/ips', mockAuth, async (req, res, next) => {
+router.get('/metrics/top/ips', async (req, res, next) => {
   try {
     const limit = parseInt(req.query.limit) || 10;
     const ips = await metricsService.getTopIPs(limit);
@@ -718,7 +711,7 @@ router.get('/metrics/top/ips', mockAuth, async (req, res, next) => {
  * Get rule metrics
  * GET /admin/metrics/rule/:ruleId
  */
-router.get('/metrics/rule/:ruleId', mockAuth, async (req, res, next) => {
+router.get('/metrics/rule/:ruleId', async (req, res, next) => {
   try {
     const { ruleId } = req.params;
     const metrics = await metricsService.getRuleMetrics(ruleId);
@@ -737,7 +730,7 @@ router.get('/metrics/rule/:ruleId', mockAuth, async (req, res, next) => {
  * Get performance metrics
  * GET /admin/metrics/performance
  */
-router.get('/metrics/performance', mockAuth, async (req, res, next) => {
+router.get('/metrics/performance', async (req, res, next) => {
   try {
     const percentiles = await metricsService.getResponseTimePercentiles();
 
@@ -755,7 +748,7 @@ router.get('/metrics/performance', mockAuth, async (req, res, next) => {
  * Reset metrics
  * POST /admin/metrics/reset
  */
-router.post('/metrics/reset', mockAuth, async (req, res, next) => {
+router.post('/metrics/reset', async (req, res, next) => {
   try {
     await metricsService.resetMetrics();
 
@@ -775,7 +768,7 @@ router.post('/metrics/reset', mockAuth, async (req, res, next) => {
  * Get real-time request statistics
  * GET /admin/stats/requests
  */
-router.get('/stats/requests', mockAuth, (req, res, next) => {
+router.get('/stats/requests', (req, res, next) => {
   try {
     const stats = getRequestStats();
 
@@ -793,7 +786,7 @@ router.get('/stats/requests', mockAuth, (req, res, next) => {
  * Reset request statistics
  * POST /admin/stats/requests/reset
  */
-router.post('/stats/requests/reset', mockAuth, (req, res, next) => {
+router.post('/stats/requests/reset', (req, res, next) => {
   try {
     resetRequestStats();
 
