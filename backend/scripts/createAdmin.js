@@ -10,6 +10,7 @@ require('dotenv').config();
 const bcrypt = require('bcryptjs');
 const { createUser, getUserByEmail } = require('../src/models/User');
 const { connectRedis, closeRedis } = require('../src/config/redis');
+const { validatePassword } = require('../src/validators/passwordValidator');
 const logger = require('../src/utils/logger');
 
 /**
@@ -27,6 +28,27 @@ const createAdminUser = async () => {
     // Admin credentials
     const email = process.env.ADMIN_EMAIL || 'admin@example.com';
     const password = process.env.ADMIN_PASSWORD || 'admin123';
+
+    // Validate password requirements
+    console.log('🔍 Validating password requirements...');
+    const passwordValidation = validatePassword(password);
+    
+    if (!passwordValidation.valid) {
+      console.log('❌ Password does not meet security requirements:\n');
+      passwordValidation.errors.forEach((error, index) => {
+        console.log(`   ${index + 1}. ${error}`);
+      });
+      console.log('\n💡 Password must:');
+      console.log('   - Be at least 12 characters long');
+      console.log('   - Contain at least one uppercase letter');
+      console.log('   - Contain at least one lowercase letter');
+      console.log('   - Contain at least one number');
+      console.log('   - Contain at least one special character');
+      console.log('\n   Set a strong password in your .env file:');
+      console.log('   ADMIN_PASSWORD=YourSecureP@ssw0rd123');
+      throw new Error('Password does not meet security requirements');
+    }
+    console.log('✓ Password meets security requirements\n');
 
     // Check if admin already exists
     console.log('🔍 Checking if admin user exists...');
