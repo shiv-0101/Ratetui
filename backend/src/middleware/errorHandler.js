@@ -29,6 +29,7 @@ const ErrorCodes = {
   RATE_LIMIT_EXCEEDED: { status: 429, message: 'Too many requests' },
   IP_BLOCKED: { status: 403, message: 'IP address is blocked' },
   USER_BLOCKED: { status: 403, message: 'User is blocked' },
+  ACCOUNT_LOCKED: { status: 429, message: 'Account is temporarily locked' },
   UNAUTHORIZED: { status: 401, message: 'Authentication required' },
   FORBIDDEN: { status: 403, message: 'Insufficient permissions' },
   VALIDATION_ERROR: { status: 400, message: 'Validation failed' },

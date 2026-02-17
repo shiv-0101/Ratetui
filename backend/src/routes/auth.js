@@ -12,6 +12,7 @@ const { authenticate, blacklistToken, storeRefreshToken, verifyRefreshToken, del
 const { rateLimiters } = require('../middleware/rateLimiter');
 const { createError } = require('../middleware/errorHandler');
 const { getRedisClient, isRedisConnected } = require('../config/redis');
+const { isAccountLocked, recordFailedAttempt, resetFailedAttempts } = require('../utils/accountLockout');
 const logger = require('../utils/logger');
 
 const router = express.Router();
@@ -51,19 +52,65 @@ router.post(
 
       const { email, password } = req.body;
 
+      // Check if account is locked
+      const lockStatus = await isAccountLocked(email);
+      if (lockStatus.locked) {
+        logger.warn('Login attempt on locked account', { 
+          email: email.substring(0, 3) + '***', 
+          remainingSeconds: lockStatus.remainingSeconds,
+          ip: req.ip,
+        });
+        throw createError('ACCOUNT_LOCKED', 
+          `Account is locked due to too many failed login attempts. Please try again in ${Math.ceil(lockStatus.remainingSeconds / 60)} minutes.`,
+          { 
+            remainingSeconds: lockStatus.remainingSeconds,
+            lockUntil: lockStatus.lockUntil,
+          }
+        );
+      }
+
       // Find user (mock for now)
       const user = MOCK_USERS[email];
       if (!user) {
         logger.warn('Login attempt with non-existent email', { email, ip: req.ip });
-        throw createError('UNAUTHORIZED', 'Invalid email or password');
+        
+        // Record failed attempt
+        const attemptResult = await recordFailedAttempt(email);
+        
+        if (attemptResult.locked) {
+          throw createError('ACCOUNT_LOCKED', 
+            `Account is locked due to too many failed login attempts. Please try again in ${Math.ceil(attemptResult.lockoutDuration / 60)} minutes.`
+          );
+        }
+        
+        throw createError('UNAUTHORIZED', 
+          `Invalid email or password. ${attemptResult.attemptsRemaining} attempts remaining.`,
+          { attemptsRemaining: attemptResult.attemptsRemaining }
+        );
       }
 
       // Verify password
       const isValidPassword = await bcrypt.compare(password, user.passwordHash);
       if (!isValidPassword) {
         logger.warn('Login attempt with incorrect password', { email, ip: req.ip });
-        throw createError('UNAUTHORIZED', 'Invalid email or password');
+        
+        // Record failed attempt
+        const attemptResult = await recordFailedAttempt(email);
+        
+        if (attemptResult.locked) {
+          throw createError('ACCOUNT_LOCKED', 
+            `Account is locked due to too many failed login attempts. Please try again in ${Math.ceil(attemptResult.lockoutDuration / 60)} minutes.`
+          );
+        }
+        
+        throw createError('UNAUTHORIZED', 
+          `Invalid email or password. ${attemptResult.attemptsRemaining} attempts remaining.`,
+          { attemptsRemaining: attemptResult.attemptsRemaining }
+        );
       }
+
+      // Reset failed attempts on successful login
+      await resetFailedAttempts(email);
 
       // Generate tokens
       const accessToken = generateAccessToken(user);

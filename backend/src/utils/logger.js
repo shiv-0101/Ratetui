@@ -140,6 +140,18 @@ const logAudit = (action, actor, resource, details = {}, result = 'success') => 
   });
 };
 
+/**
+ * Log security event
+ */
+logger.security = (message, meta = {}) => {
+  logger.warn({
+    type: 'security',
+    message,
+    ...meta,
+    timestamp: new Date().toISOString(),
+  });
+};
+
 module.exports = logger;
 module.exports.auditLogger = auditLogger;
 module.exports.logAudit = logAudit;
