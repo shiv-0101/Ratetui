@@ -25,6 +25,7 @@ const {
   requestTrackerWithIPCheck, 
   requestStatsTracker 
 } = require('./middleware/requestTracker');
+const { validateAllInputs } = require('./middleware/inputValidation');
 
 // Import routes
 const healthRoutes = require('./routes/health');
@@ -94,6 +95,13 @@ if (process.env.NODE_ENV !== 'test') {
   app.use(morganMiddleware);
   app.use(logSlowRequest);
 }
+
+// ===========================================
+// Input Validation
+// ===========================================
+
+// Validate all inputs (headers, query, params, body)
+app.use(validateAllInputs);
 
 // ===========================================
 // Request Tracking & Metrics
