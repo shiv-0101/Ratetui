@@ -26,6 +26,7 @@ const {
   requestStatsTracker 
 } = require('./middleware/requestTracker');
 const { validateAllInputs } = require('./middleware/inputValidation');
+const { validateSizeLimits, bodyLimitErrorHandler } = require('./middleware/sizeLimits');
 
 // Import routes
 const healthRoutes = require('./routes/health');
@@ -89,6 +90,12 @@ app.use(requestTimeout(30000));
 // Body parsing with size limits
 app.use(express.json({ limit: '100kb' }));
 app.use(express.urlencoded({ extended: true, limit: '100kb' }));
+
+// Handle body size limit errors
+app.use(bodyLimitErrorHandler);
+
+// Enforce additional size limits (URL, headers, query params)
+app.use(validateSizeLimits);
 
 // Request logging with request ID, IP masking, and timing
 if (process.env.NODE_ENV !== 'test') {
