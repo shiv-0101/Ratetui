@@ -33,6 +33,7 @@ const {
   protectAgainstPrototypePollution,
   verifyPrototypeIntegrity,
 } = require('./middleware/prototypePollutionProtection');
+const { validateRedisInputs } = require('./middleware/noSqlInjectionPrevention');
 
 // Freeze prototypes at startup to prevent pollution
 freezePrototypes();
@@ -131,6 +132,9 @@ if (process.env.NODE_ENV !== 'test') {
 
 // Validate all inputs (headers, query, params, body)
 app.use(validateAllInputs);
+
+// Prevent NoSQL injection in Redis operations
+app.use(validateRedisInputs);
 
 // ===========================================
 // Request Tracking & Metrics
