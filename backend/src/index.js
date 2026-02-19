@@ -28,6 +28,20 @@ const {
 const { validateAllInputs } = require('./middleware/inputValidation');
 const { validateSizeLimits, bodyLimitErrorHandler } = require('./middleware/sizeLimits');
 const { validateContentTypes, validateJsonBody } = require('./middleware/contentTypeValidation');
+const { 
+  freezePrototypes, 
+  protectAgainstPrototypePollution,
+  verifyPrototypeIntegrity,
+} = require('./middleware/prototypePollutionProtection');
+
+// Freeze prototypes at startup to prevent pollution
+freezePrototypes();
+
+// Verify prototype integrity
+if (!verifyPrototypeIntegrity()) {
+  logger.error('Prototype integrity check failed at startup!');
+  process.exit(1);
+}
 
 // Import routes
 const healthRoutes = require('./routes/health');
@@ -101,6 +115,9 @@ app.use(validateContentTypes);
 
 // Enforce additional size limits (URL, headers, query params)
 app.use(validateSizeLimits);
+
+// Protect against prototype pollution attacks
+app.use(protectAgainstPrototypePollution);
 
 // Request logging with request ID, IP masking, and timing
 if (process.env.NODE_ENV !== 'test') {
