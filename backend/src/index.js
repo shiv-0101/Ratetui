@@ -14,6 +14,7 @@ const cors = require('cors');
 const logger = require('./utils/logger');
 const { connectRedis, closeRedis } = require('./config/redis');
 const { corsOptions } = require('./config/cors');
+const { logTlsConfiguration } = require('./config/tls');
 const errorHandler = require('./middleware/errorHandler');
 const { 
   addRequestId, 
@@ -210,6 +211,9 @@ async function startServer() {
   try {
     // Display startup banner
     displayStartupBanner();
+
+    // Log TLS configuration
+    logTlsConfiguration();
 
     // Connect to Redis
     await connectRedis();

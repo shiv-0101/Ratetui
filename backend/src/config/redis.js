@@ -47,9 +47,14 @@ const validateRedisConfig = () => {
     warnings.push('TLS enabled in development mode. Ensure Redis server supports TLS.');
   }
   
+  // Enforce TLS in production
+  if (process.env.NODE_ENV === 'production' && !tlsEnabled) {
+    errors.push('TLS must be enabled in production (set REDIS_TLS=true)');
+  }
+  
   // Check password in production
   if (process.env.NODE_ENV === 'production' && !process.env.REDIS_PASSWORD) {
-    warnings.push('No Redis password set in production. Consider enabling authentication.');
+    errors.push('Redis password is required in production (set REDIS_PASSWORD)');
   }
   
   return { valid: errors.length === 0, errors, warnings, config: { host, port, db, tlsEnabled } };
@@ -162,11 +167,57 @@ const getRedisOptions = () => {
     options.password = process.env.REDIS_PASSWORD;
   }
 
-  // Add TLS if enabled
-  if (process.env.REDIS_TLS === 'true') {
+  // Add TLS if enabled (enforced in production)
+  const tlsEnabled = process.env.REDIS_TLS === 'true' || process.env.NODE_ENV === 'production';
+  
+  if (tlsEnabled) {
     options.tls = {
+      // Enforce TLS 1.3 in production, allow TLS 1.2+ in development
+      minVersion: process.env.NODE_ENV === 'production' ? 'TLSv1.3' : 'TLSv1.2',
+      maxVersion: 'TLSv1.3',
+      
+      // Reject unauthorized certificates in production
       rejectUnauthorized: process.env.NODE_ENV === 'production',
+      
+      // Prefer server cipher order
+      honorCipherOrder: true,
+      
+      // Use strong cipher suites (TLS 1.3 recommended)
+      ciphers: process.env.NODE_ENV === 'production'
+        ? [
+            // TLS 1.3 cipher suites (AEAD only)
+            'TLS_AES_256_GCM_SHA384',
+            'TLS_CHACHA20_POLY1305_SHA256',
+            'TLS_AES_128_GCM_SHA256',
+          ].join(':')
+        : undefined, // Allow default TLS 1.2+ ciphers in development
+      
+      // Enable session resumption for performance
+      sessionTimeout: 300, // 5 minutes
+      
+      // Request client certificate (if needed for mutual TLS)
+      requestCert: process.env.REDIS_TLS_CLIENT_CERT ? true : false,
+      
+      // Certificate paths (if using file-based certs)
+      ...(process.env.REDIS_TLS_CA_CERT && {
+        ca: require('fs').readFileSync(process.env.REDIS_TLS_CA_CERT),
+      }),
+      ...(process.env.REDIS_TLS_CLIENT_CERT && {
+        cert: require('fs').readFileSync(process.env.REDIS_TLS_CLIENT_CERT),
+      }),
+      ...(process.env.REDIS_TLS_CLIENT_KEY && {
+        key: require('fs').readFileSync(process.env.REDIS_TLS_CLIENT_KEY),
+      }),
     };
+    
+    logger.info('Redis TLS enabled', {
+      minVersion: options.tls.minVersion,
+      maxVersion: options.tls.maxVersion,
+      rejectUnauthorized: options.tls.rejectUnauthorized,
+      mutualTLS: options.tls.requestCert || false,
+    });
+  } else {
+    logger.warn('Redis TLS is disabled. Not recommended for production!');
   }
 
   return options;
