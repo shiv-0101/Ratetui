@@ -20,6 +20,10 @@ const {
   hstsMiddleware, 
   logHstsConfiguration 
 } = require('./config/hsts');
+const { 
+  additionalSecurityHeaders, 
+  logSecurityHeadersConfiguration 
+} = require('./config/securityHeaders');
 const errorHandler = require('./middleware/errorHandler');
 const { 
   addRequestId, 
@@ -100,6 +104,9 @@ app.use(cors(corsOptions));
 
 // HSTS - HTTP Strict Transport Security
 app.use(hstsMiddleware);
+
+// Additional security headers
+app.use(additionalSecurityHeaders);
 
 // Trust proxy (important for correct IP extraction)
 const trustProxy = process.env.TRUST_PROXY || 'loopback';
@@ -231,6 +238,9 @@ async function startServer() {
 
     // Log CORS configuration
     logCorsConfiguration();
+
+    // Log security headers configuration
+    logSecurityHeadersConfiguration();
 
     // Connect to Redis
     await connectRedis();
