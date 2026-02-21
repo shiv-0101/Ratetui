@@ -13,7 +13,7 @@ const cors = require('cors');
 
 const logger = require('./utils/logger');
 const { connectRedis, closeRedis } = require('./config/redis');
-const { corsOptions } = require('./config/cors');
+const { corsOptions, logCorsConfiguration } = require('./config/cors');
 const { logTlsConfiguration } = require('./config/tls');
 const { 
   enforceHttpsRedirect, 
@@ -228,6 +228,9 @@ async function startServer() {
 
     // Log HSTS configuration
     logHstsConfiguration();
+
+    // Log CORS configuration
+    logCorsConfiguration();
 
     // Connect to Redis
     await connectRedis();
