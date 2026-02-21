@@ -15,6 +15,11 @@ const logger = require('./utils/logger');
 const { connectRedis, closeRedis } = require('./config/redis');
 const { corsOptions } = require('./config/cors');
 const { logTlsConfiguration } = require('./config/tls');
+const { 
+  enforceHttpsRedirect, 
+  hstsMiddleware, 
+  logHstsConfiguration 
+} = require('./config/hsts');
 const errorHandler = require('./middleware/errorHandler');
 const { 
   addRequestId, 
@@ -57,6 +62,9 @@ const app = express();
 // Security Middleware
 // ===========================================
 
+// Force HTTPS in production (before any other middleware)
+app.use(enforceHttpsRedirect);
+
 // Helmet - Security headers
 app.use(helmet({
   contentSecurityPolicy: {
@@ -89,6 +97,9 @@ app.use(helmet({
 
 // CORS
 app.use(cors(corsOptions));
+
+// HSTS - HTTP Strict Transport Security
+app.use(hstsMiddleware);
 
 // Trust proxy (important for correct IP extraction)
 const trustProxy = process.env.TRUST_PROXY || 'loopback';
@@ -214,6 +225,9 @@ async function startServer() {
 
     // Log TLS configuration
     logTlsConfiguration();
+
+    // Log HSTS configuration
+    logHstsConfiguration();
 
     // Connect to Redis
     await connectRedis();
