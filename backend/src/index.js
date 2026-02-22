@@ -24,6 +24,7 @@ const {
   additionalSecurityHeaders, 
   logSecurityHeadersConfiguration 
 } = require('./config/securityHeaders');
+const { initializeSecrets } = require('./config/secrets');
 const errorHandler = require('./middleware/errorHandler');
 const { 
   addRequestId, 
@@ -229,6 +230,9 @@ async function startServer() {
   try {
     // Display startup banner
     displayStartupBanner();
+
+    // Validate secrets and environment configuration (fail fast if invalid)
+    initializeSecrets();
 
     // Log TLS configuration
     logTlsConfiguration();
