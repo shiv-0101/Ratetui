@@ -31,6 +31,27 @@ const validateRedisConfig = () => {
     errors.push('REDIS_HOST environment variable is required');
   }
   
+  // Network Security: Ensure Redis is not publicly accessible
+  if (host) {
+    const publicAddresses = ['0.0.0.0', '::'];
+    const isPublicAddress = publicAddresses.includes(host);
+    
+    if (isPublicAddress) {
+      errors.push(`SECURITY RISK: REDIS_HOST is set to ${host} which exposes Redis publicly. Use 'localhost', '127.0.0.1', or internal network address.`);
+    }
+    
+    // Check for public IP ranges (simple validation)
+    if (host.match(/^(?!10\.|172\.(1[6-9]|2[0-9]|3[01])\.|192\.168\.|127\.|localhost)/)) {
+      warnings.push(`REDIS_HOST (${host}) appears to be a public address. Ensure Redis is on an internal network with firewall rules.`);
+    }
+    
+    // Validate hostname/IP format
+    const isValidHost = /^([a-zA-Z0-9.-]+|(\d{1,3}\.){3}\d{1,3}|([0-9a-fA-F:]+))$/.test(host);
+    if (!isValidHost) {
+      errors.push(`Invalid REDIS_HOST format: ${host}`);
+    }
+  }
+  
   // Validate port
   if (isNaN(port) || port < 1 || port > 65535) {
     errors.push(`Invalid REDIS_PORT: ${process.env.REDIS_PORT}. Must be between 1-65535`);

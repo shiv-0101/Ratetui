@@ -38,8 +38,9 @@ services:
   redis:
     image: redis:7-alpine
     container_name: ratetui-redis
-    ports:
-      - "6379:6379"
+    # No port exposure - Redis is only accessible within internal network
+    # ports:
+    #   - "6379:6379"  # SECURITY: Never expose Redis publicly
     volumes:
       - redis-data:/data
       - ./backend/redis.conf:/usr/local/etc/redis/redis.conf:ro
