@@ -14,6 +14,7 @@ const { ruleValidationRules, validate } = require('../validators/ruleValidator')
 const ruleService = require('../services/ruleService');
 const ipManagement = require('../services/ipManagement');
 const metricsService = require('../services/metricsService');
+const dataRetention = require('../services/dataRetention');
 const { getRequestStats, resetRequestStats } = require('../middleware/requestTracker');
 const { createError } = require('../middleware/errorHandler');
 const logger = require('../utils/logger');
@@ -799,6 +800,56 @@ router.post('/stats/requests/reset', (req, res, next) => {
   } catch (error) {
     logger.error('Failed to reset request stats', { error: error.message });
     next(createError('INTERNAL_ERROR', 'Failed to reset request statistics'));
+  }
+});
+
+// ===========================================
+// Data Retention Management
+// ===========================================
+
+/**
+ * Get data retention statistics
+ * GET /admin/retention/stats
+ */
+router.get('/retention/stats', async (req, res, next) => {
+  try {
+    const stats = await dataRetention.getRetentionStatistics();
+
+    res.json({
+      success: true,
+      data: {
+        policies: dataRetention.RETENTION_POLICIES,
+        statistics: stats,
+        timestamp: new Date().toISOString(),
+      }
+    });
+  } catch (error) {
+    logger.error('Failed to get retention stats', { error: error.message });
+    next(createError('INTERNAL_ERROR', 'Failed to retrieve retention statistics'));
+  }
+});
+
+/**
+ * Run manual cleanup
+ * POST /admin/retention/cleanup
+ */
+router.post('/retention/cleanup', async (req, res, next) => {
+  try {
+    logger.info('Manual retention cleanup triggered', { user: req.user.id });
+    
+    const results = await dataRetention.runPeriodicCleanup();
+
+    res.json({
+      success: true,
+      data: {
+        message: 'Cleanup completed',
+        results,
+        timestamp: new Date().toISOString(),
+      }
+    });
+  } catch (error) {
+    logger.error('Failed to run cleanup', { error: error.message });
+    next(createError('INTERNAL_ERROR', 'Failed to run cleanup'));
   }
 });
 

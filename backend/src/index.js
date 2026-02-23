@@ -25,6 +25,7 @@ const {
   logSecurityHeadersConfiguration 
 } = require('./config/securityHeaders');
 const { initializeSecrets } = require('./config/secrets');
+const { runPeriodicCleanup } = require('./services/dataRetention');
 const errorHandler = require('./middleware/errorHandler');
 const { 
   addRequestId, 
@@ -256,6 +257,27 @@ async function startServer() {
       logger.info(`Environment: ${process.env.NODE_ENV || 'development'}`);
     });
 
+    // Start periodic data retention cleanup (every 6 hours)
+    const CLEANUP_INTERVAL = 6 * 60 * 60 * 1000; // 6 hours
+    const cleanupInterval = setInterval(async () => {
+      try {
+        logger.info('Running scheduled data retention cleanup');
+        await runPeriodicCleanup();
+      } catch (error) {
+        logger.error('Scheduled cleanup failed:', { error: error.message });
+      }
+    }, CLEANUP_INTERVAL);
+
+    // Run initial cleanup after 5 minutes of startup
+    setTimeout(async () => {
+      try {
+        logger.info('Running initial data retention cleanup');
+        await runPeriodicCleanup();
+      } catch (error) {
+        logger.error('Initial cleanup failed:', { error: error.message });
+      }
+    }, 5 * 60 * 1000);
+
     // Track active connections for graceful shutdown
     const activeConnections = new Set();
     let isShuttingDown = false;
@@ -272,6 +294,12 @@ async function startServer() {
       
       logger.info(`${signal} received. Shutting down gracefully...`);
       logger.info(`Active connections: ${activeConnections.size}`);
+
+      // Stop periodic cleanup
+      if (cleanupInterval) {
+        clearInterval(cleanupInterval);
+        logger.info('Stopped periodic cleanup job');
+      }
 
       // Stop accepting new connections
       server.close(async () => {
