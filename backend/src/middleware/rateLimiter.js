@@ -10,6 +10,7 @@ const { RateLimiterRedis, RateLimiterMemory } = require('rate-limiter-flexible')
 const { getRedisClient, isRedisConnected, getFailureMode } = require('../config/redis');
 const logger = require('../utils/logger');
 const { createError } = require('./errorHandler');
+const { validateRateLimitKey } = require('./bypassPrevention');
 
 // Store rate limiters
 const rateLimiters = new Map();
@@ -469,6 +470,28 @@ const createRateLimiterMiddleware = (options = {}) => {
       const key = options.includeEndpoint 
         ? `${identifier}:${req.method}:${req.baseUrl}${req.path}`
         : identifier;
+
+      // Validate rate limit key to prevent bypass attempts
+      if (!validateRateLimitKey(key)) {effectiveConfig);
+
+      // Consume point (sliding window counter)
+      const rateLimiterRes = await rateLimiter.consume(key);
+
+      // Set comprehensive rate limit headers
+      setRateLimitHeaders(res, rateLimiterRes, effe
+      if (req.highRisk) {
+        logger.security('Applying stricter rate limits for high-risk request', {
+          ip: req.secureIP || req.ip,
+          path: req.path,
+          originalPoints: activeConfig.points,
+        });
+        
+        // Reduce allowed requests by 50% for high-risk clients
+        effectiveConfig = {
+          ...activeConfig,
+          points: Math.ceil(activeConfig.points * 0.5),
+        };
+      }
 
       // Get rate limiter
       const rateLimiter = getRateLimiter(activeConfig);

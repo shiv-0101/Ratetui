@@ -38,6 +38,10 @@ const {
   configureServerTimeouts,
   logTimeoutConfiguration,
 } = require('./middleware/timeoutProtection');
+const {
+  bypassPreventionMiddleware,
+  logBypassPreventionConfig,
+} = require('./middleware/bypassPrevention');
 const { 
   requestTrackerWithIPCheck, 
   requestStatsTracker 
@@ -125,6 +129,9 @@ app.set('trust proxy', trustProxy);
 
 // Add request ID to all requests
 app.use(addRequestId);
+
+// Rate limit bypass prevention (IP validation, UA rotation detection, distributed attack detection)
+app.use(bypassPreventionMiddleware);
 
 // Advanced timeout protection (slow loris attack prevention)
 app.use(requestTimeoutProtection({ timeout: 30000 }));
@@ -243,6 +250,9 @@ async function startServer() {
 
     // Log timeout configuration
     logTimeoutConfiguration();
+
+    // Log bypass prevention configuration
+    logBypassPreventionConfig();
 
     // Log TLS configuration
     logTlsConfiguration();
