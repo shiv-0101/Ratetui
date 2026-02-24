@@ -1,0 +1,30 @@
+# Security Reports Directory
+
+This directory contains automated vulnerability scan reports.
+
+## Reports
+
+- `vulnerability-scan-*.json` - npm audit results with filtered vulnerabilities
+
+## Usage
+
+Run security check:
+```bash
+npm run security:check
+```
+
+Run in CI/CD with strict mode:
+```bash
+npm run security:check:ci
+```
+
+## Configuration
+
+Set environment variables to configure:
+- `VULN_MIN_SEVERITY` - Minimum severity to report (low, moderate, high, critical)
+- `VULN_FAIL_BUILD` - Fail build on vulnerabilities (true/false)
+- `VULN_ALLOWED` - Comma-separated list of allowed advisory IDs
+
+## Report Retention
+
+Reports are not committed to git. Keep last 10 reports locally for reference.

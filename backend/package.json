@@ -10,7 +10,13 @@
     "test:watch": "jest --watch",
     "test:integration": "node scripts/integration-test.js",
     "lint": "eslint src/",
-    "lint:fix": "eslint src/ --fix"
+    "lint:fix": "eslint src/ --fix",
+    "audit": "npm audit",
+    "audit:fix": "npm audit fix",
+    "security:check": "node scripts/checkVulnerabilities.js",
+    "security:check:ci": "VULN_MIN_SEVERITY=moderate VULN_FAIL_BUILD=true node scripts/checkVulnerabilities.js",
+    "preinstall": "npm audit --audit-level=moderate || true",
+    "postinstall": "npm audit --audit-level=high || echo 'Warning: High severity vulnerabilities found'"
   },
   "keywords": [
     "rate-limiter",
