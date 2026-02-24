@@ -31,8 +31,13 @@ const {
   addRequestId, 
   morganMiddleware, 
   logSlowRequest,
-  requestTimeout,
 } = require('./middleware/requestLogger');
+const {
+  requestTimeoutProtection,
+  bodyReceiveTimeout,
+  configureServerTimeouts,
+  logTimeoutConfiguration,
+} = require('./middleware/timeoutProtection');
 const { 
   requestTrackerWithIPCheck, 
   requestStatsTracker 
@@ -121,8 +126,9 @@ app.set('trust proxy', trustProxy);
 // Add request ID to all requests
 app.use(addRequestId);
 
-// Request timeout (30 seconds)
-app.use(requestTimeout(30000));
+// Advanced timeout protection (slow loris attack prevention)
+app.use(requestTimeoutProtection({ timeout: 30000 }));
+app.use(bodyReceiveTimeout(15000)); // 15s between body chunks
 
 // Body parsing with size limits
 app.use(express.json({ limit: '100kb' }));
@@ -235,6 +241,9 @@ async function startServer() {
     // Validate secrets and environment configuration (fail fast if invalid)
     initializeSecrets();
 
+    // Log timeout configuration
+    logTimeoutConfiguration();
+
     // Log TLS configuration
     logTlsConfiguration();
 
@@ -256,6 +265,12 @@ async function startServer() {
       logger.info(`Rate Limiter Server running on http://${HOST}:${PORT}`);
       logger.info(`Environment: ${process.env.NODE_ENV || 'development'}`);
     });
+
+    // Configure server-level timeouts (slow loris protection)
+    configureServerTimeouts(server);
+
+    // Configure server-level timeouts (slow loris protection)
+    configureServerTimeouts(server);
 
     // Start periodic data retention cleanup (every 6 hours)
     const CLEANUP_INTERVAL = 6 * 60 * 60 * 1000; // 6 hours
