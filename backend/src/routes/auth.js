@@ -14,6 +14,8 @@ const { getCsrfToken } = require('../middleware/csrfProtection');
 const { createError } = require('../middleware/errorHandler');
 const { getRedisClient, isRedisConnected } = require('../config/redis');
 const { isAccountLocked, recordFailedAttempt, resetFailedAttempts } = require('../utils/accountLockout');
+const securityMonitor = require('../services/securityMonitor');
+const auditLog = require('../services/auditLog');
 const logger = require('../utils/logger');
 
 const router = express.Router();
@@ -82,6 +84,12 @@ router.post(
       if (!user) {
         logger.warn('Login attempt with non-existent email', { email, ip: req.ip });
         
+        // Track security event
+        await securityMonitor.trackSecurityEvent(
+          securityMonitor.SECURITY_EVENTS.FAILED_LOGIN,
+          { email, ip: req.ip, reason: 'user_not_found' }
+        );
+        
         // Record failed attempt
         const attemptResult = await recordFailedAttempt(email);
         
@@ -101,6 +109,12 @@ router.post(
       const isValidPassword = await bcrypt.compare(password, user.passwordHash);
       if (!isValidPassword) {
         logger.warn('Login attempt with incorrect password', { email, ip: req.ip });
+        
+        // Track security event
+        await securityMonitor.trackSecurityEvent(
+          securityMonitor.SECURITY_EVENTS.FAILED_LOGIN,
+          { email, ip: req.ip, reason: 'invalid_password' }
+        );
         
         // Record failed attempt
         const attemptResult = await recordFailedAttempt(email);
@@ -142,6 +156,18 @@ router.post(
 
       // Store refresh token in Redis
       await storeRefreshToken(user.id, refreshToken, refreshExpirySeconds);
+
+      // Create audit log for successful login
+      await auditLog.createAuditLog({
+        category: auditLog.AUDIT_CATEGORIES.AUTHENTICATION,
+        action: auditLog.AUDIT_ACTIONS.LOGIN_SUCCESS,
+        actor: user.id,
+        actorType: 'user',
+        result: auditLog.AUDIT_RESULTS.SUCCESS,
+        ipAddress: req.ip,
+        userAgent: req.get('user-agent'),
+        details: { email },
+      });
 
       logger.info('User logged in successfully', { userId: user.id, email: user.email, ip: req.ip });
 

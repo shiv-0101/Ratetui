@@ -16,6 +16,7 @@ const ipManagement = require('../services/ipManagement');
 const metricsService = require('../services/metricsService');
 const dataRetention = require('../services/dataRetention');
 const auditLog = require('../services/auditLog');
+const securityMonitor = require('../services/securityMonitor');
 const { getRequestStats, resetRequestStats } = require('../middleware/requestTracker');
 const { createError } = require('../middleware/errorHandler');
 const logger = require('../utils/logger');
@@ -1044,6 +1045,74 @@ router.get('/audit/export/csv', async (req, res, next) => {
   } catch (error) {
     logger.error('Failed to export audit logs (CSV)', { error: error.message });
     next(createError('INTERNAL_ERROR', 'Failed to export audit logs'));
+  }
+});
+
+// ===========================================
+// Security Monitoring
+// ===========================================
+
+/**
+ * Get security dashboard
+ * GET /admin/security/dashboard
+ */
+router.get('/security/dashboard', async (req, res, next) => {
+  try {
+    const dashboard = await securityMonitor.getSecurityDashboard();
+
+    res.json({
+      success: true,
+      data: dashboard,
+    });
+  } catch (error) {
+    logger.error('Failed to get security dashboard', { error: error.message });
+    next(createError('INTERNAL_ERROR', 'Failed to retrieve security dashboard'));
+  }
+});
+
+/**
+ * Get security metrics for date range
+ * GET /admin/security/metrics
+ */
+router.get('/security/metrics', async (req, res, next) => {
+  try {
+    const { startDate, endDate } = req.query;
+
+    const metrics = await securityMonitor.getSecurityMetrics(startDate, endDate);
+
+    res.json({
+      success: true,
+      data: metrics,
+    });
+  } catch (error) {
+    logger.error('Failed to get security metrics', { error: error.message });
+    next(createError('INTERNAL_ERROR', 'Failed to retrieve security metrics'));
+  }
+});
+
+/**
+ * Get recent security events
+ * GET /admin/security/events
+ */
+router.get('/security/events', async (req, res, next) => {
+  try {
+    const { eventType, limit = 50 } = req.query;
+
+    const events = await securityMonitor.getRecentSecurityEvents(
+      eventType,
+      parseInt(limit, 10)
+    );
+
+    res.json({
+      success: true,
+      data: {
+        events,
+        count: events.length,
+      },
+    });
+  } catch (error) {
+    logger.error('Failed to get security events', { error: error.message });
+    next(createError('INTERNAL_ERROR', 'Failed to retrieve security events'));
   }
 });
 
