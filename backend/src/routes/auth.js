@@ -10,6 +10,7 @@ const bcrypt = require('bcryptjs');
 const { generateAccessToken, generateRefreshToken, verifyAccessToken, getTokenExpiry, decodeToken } = require('../services/jwt');
 const { authenticate, blacklistToken, storeRefreshToken, verifyRefreshToken, deleteRefreshToken } = require('../middleware/auth');
 const { rateLimiters } = require('../middleware/rateLimiter');
+const { getCsrfToken } = require('../middleware/csrfProtection');
 const { createError } = require('../middleware/errorHandler');
 const { getRedisClient, isRedisConnected } = require('../config/redis');
 const { isAccountLocked, recordFailedAttempt, resetFailedAttempts } = require('../utils/accountLockout');
@@ -28,6 +29,13 @@ const MOCK_USERS = {
     role: 'admin',
   },
 };
+
+/**
+ * GET /admin/auth/csrf-token
+ * Get CSRF token for session
+ * Can be called without authentication
+ */
+router.get('/csrf-token', getCsrfToken);
 
 /**
  * POST /admin/auth/login

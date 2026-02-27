@@ -10,6 +10,7 @@ require('dotenv').config();
 const express = require('express');
 const helmet = require('helmet');
 const cors = require('cors');
+const cookieParser = require('cookie-parser');
 
 const logger = require('./utils/logger');
 const { connectRedis, closeRedis } = require('./config/redis');
@@ -42,6 +43,11 @@ const {
   bypassPreventionMiddleware,
   logBypassPreventionConfig,
 } = require('./middleware/bypassPrevention');
+const {
+  csrfProtection,
+  setCsrfToken,
+  logCsrfConfiguration,
+} = require('./middleware/csrfProtection');
 const { 
   requestTrackerWithIPCheck, 
   requestStatsTracker 
@@ -130,6 +136,9 @@ app.set('trust proxy', trustProxy);
 // Add request ID to all requests
 app.use(addRequestId);
 
+// Cookie parser (required for CSRF protection)
+app.use(cookieParser());
+
 // Rate limit bypass prevention (IP validation, UA rotation detection, distributed attack detection)
 app.use(bypassPreventionMiddleware);
 
@@ -170,9 +179,16 @@ app.use(validateAllInputs);
 // Prevent NoSQL injection in Redis operations
 app.use(validateRedisInputs);
 
+// CSRF Protection (double-submit cookie pattern)
+app.use(csrfProtection);
+
+// Set CSRF token for authenticated requests
+app.use(setCsrfToken);
+
 // ===========================================
 // Request Tracking & Metrics
 // ===========================================
+
 
 // Track requests for metrics and IP checks
 app.use(requestTrackerWithIPCheck);
@@ -253,6 +269,9 @@ async function startServer() {
 
     // Log bypass prevention configuration
     logBypassPreventionConfig();
+
+    // Log CSRF configuration
+    logCsrfConfiguration();
 
     // Log TLS configuration
     logTlsConfiguration();
