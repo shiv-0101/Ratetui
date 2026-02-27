@@ -264,6 +264,18 @@ logger.security = (message, meta = {}) => {
   });
 };
 
+/**
+ * Log audit event (for enhanced audit logging service)
+ */
+logger.audit = (message, meta = {}) => {
+  auditLogger.info({
+    type: 'audit',
+    message,
+    ...meta,
+    timestamp: new Date().toISOString(),
+  });
+};
+
 module.exports = logger;
 module.exports.auditLogger = auditLogger;
 module.exports.logAudit = logAudit;

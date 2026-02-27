@@ -15,6 +15,7 @@ const ruleService = require('../services/ruleService');
 const ipManagement = require('../services/ipManagement');
 const metricsService = require('../services/metricsService');
 const dataRetention = require('../services/dataRetention');
+const auditLog = require('../services/auditLog');
 const { getRequestStats, resetRequestStats } = require('../middleware/requestTracker');
 const { createError } = require('../middleware/errorHandler');
 const logger = require('../utils/logger');
@@ -850,6 +851,199 @@ router.post('/retention/cleanup', async (req, res, next) => {
   } catch (error) {
     logger.error('Failed to run cleanup', { error: error.message });
     next(createError('INTERNAL_ERROR', 'Failed to run cleanup'));
+  }
+});
+
+// ===========================================
+// Audit Log Management
+// ===========================================
+
+/**
+ * Query audit logs with filters
+ * GET /admin/audit/logs
+ */
+router.get('/audit/logs', async (req, res, next) => {
+  try {
+    const {
+      actor,
+      action,
+      category,
+      result,
+      startDate,
+      endDate,
+      limit = 50,
+      offset = 0,
+    } = req.query;
+
+    const auditData = await auditLog.queryAuditLogs({
+      actor,
+      action,
+      category,
+      result,
+      startDate,
+      endDate,
+      limit: parseInt(limit, 10),
+      offset: parseInt(offset, 10),
+    });
+
+    res.json({
+      success: true,
+      data: auditData,
+    });
+  } catch (error) {
+    logger.error('Failed to query audit logs', { error: error.message });
+    next(createError('INTERNAL_ERROR', 'Failed to retrieve audit logs'));
+  }
+});
+
+/**
+ * Get audit logs for specific actor
+ * GET /admin/audit/actor/:actorId
+ */
+router.get('/audit/actor/:actorId', async (req, res, next) => {
+  try {
+    const { actorId } = req.params;
+    const { limit = 50 } = req.query;
+
+    const auditData = await auditLog.getActorAuditLogs(actorId, parseInt(limit, 10));
+
+    res.json({
+      success: true,
+      data: auditData,
+    });
+  } catch (error) {
+    logger.error('Failed to get actor audit logs', { error: error.message });
+    next(createError('INTERNAL_ERROR', 'Failed to retrieve actor audit logs'));
+  }
+});
+
+/**
+ * Get recent audit logs
+ * GET /admin/audit/recent
+ */
+router.get('/audit/recent', async (req, res, next) => {
+  try {
+    const { limit = 50 } = req.query;
+
+    const auditData = await auditLog.getRecentAuditLogs(parseInt(limit, 10));
+
+    res.json({
+      success: true,
+      data: auditData,
+    });
+  } catch (error) {
+    logger.error('Failed to get recent audit logs', { error: error.message });
+    next(createError('INTERNAL_ERROR', 'Failed to retrieve recent audit logs'));
+  }
+});
+
+/**
+ * Get audit statistics
+ * GET /admin/audit/stats
+ */
+router.get('/audit/stats', async (req, res, next) => {
+  try {
+    const { date } = req.query;
+
+    const stats = await auditLog.getAuditStats(date);
+
+    res.json({
+      success: true,
+      data: stats,
+    });
+  } catch (error) {
+    logger.error('Failed to get audit stats', { error: error.message });
+    next(createError('INTERNAL_ERROR', 'Failed to retrieve audit statistics'));
+  }
+});
+
+/**
+ * Export audit logs to JSON
+ * GET /admin/audit/export/json
+ */
+router.get('/audit/export/json', async (req, res, next) => {
+  try {
+    const {
+      actor,
+      action,
+      category,
+      result,
+      startDate,
+      endDate,
+    } = req.query;
+
+    const jsonData = await auditLog.exportAuditLogsJSON({
+      actor,
+      action,
+      category,
+      result,
+      startDate,
+      endDate,
+    });
+
+    // Log audit export action
+    await auditLog.createAuditLog({
+      category: auditLog.AUDIT_CATEGORIES.DATA_ACCESS,
+      action: auditLog.AUDIT_ACTIONS.BULK_DATA_EXPORT,
+      actor: req.user.id,
+      actorType: 'user',
+      result: auditLog.AUDIT_RESULTS.SUCCESS,
+      ipAddress: req.ip,
+      userAgent: req.get('user-agent'),
+      details: { format: 'json', filters: req.query },
+    });
+
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Content-Disposition', `attachment; filename="audit-logs-${new Date().toISOString()}.json"`);
+    res.send(jsonData);
+  } catch (error) {
+    logger.error('Failed to export audit logs (JSON)', { error: error.message });
+    next(createError('INTERNAL_ERROR', 'Failed to export audit logs'));
+  }
+});
+
+/**
+ * Export audit logs to CSV
+ * GET /admin/audit/export/csv
+ */
+router.get('/audit/export/csv', async (req, res, next) => {
+  try {
+    const {
+      actor,
+      action,
+      category,
+      result,
+      startDate,
+      endDate,
+    } = req.query;
+
+    const csvData = await auditLog.exportAuditLogsCSV({
+      actor,
+      action,
+      category,
+      result,
+      startDate,
+      endDate,
+    });
+
+    // Log audit export action
+    await auditLog.createAuditLog({
+      category: auditLog.AUDIT_CATEGORIES.DATA_ACCESS,
+      action: auditLog.AUDIT_ACTIONS.BULK_DATA_EXPORT,
+      actor: req.user.id,
+      actorType: 'user',
+      result: auditLog.AUDIT_RESULTS.SUCCESS,
+      ipAddress: req.ip,
+      userAgent: req.get('user-agent'),
+      details: { format: 'csv', filters: req.query },
+    });
+
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', `attachment; filename="audit-logs-${new Date().toISOString()}.csv"`);
+    res.send(csvData);
+  } catch (error) {
+    logger.error('Failed to export audit logs (CSV)', { error: error.message });
+    next(createError('INTERNAL_ERROR', 'Failed to export audit logs'));
   }
 });
 
