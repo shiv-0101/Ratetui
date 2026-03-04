@@ -8,6 +8,7 @@
 const { validateApiKey } = require('../services/apiKeyService');
 const { createError } = require('./errorHandler');
 const logger = require('../utils/logger');
+const { recordAuth } = require('../services/advancedMetrics');
 
 /**
  * Extract API key from request
@@ -88,6 +89,8 @@ const authenticateApiKey = async (req, res, next) => {
       scopes: keyInfo.scopes,
     });
     
+    recordAuth('success', 'api_key');
+    
     next();
   } catch (error) {
     logger.error('API key authentication error:', { error: error.message });
@@ -104,6 +107,7 @@ const requireApiKey = async (req, res, next) => {
     const apiKey = extractApiKey(req);
     
     if (!apiKey) {
+      recordAuth('failure', 'api_key');
       return next(createError(401, 'API_KEY_REQUIRED', 'API key is required'));
     }
     
@@ -115,6 +119,7 @@ const requireApiKey = async (req, res, next) => {
         path: req.path,
       });
       
+      recordAuth('failure', 'api_key');
       return next(createError(401, 'INVALID_API_KEY', 'Invalid or expired API key'));
     }
     

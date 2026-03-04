@@ -61,6 +61,7 @@ const {
   verifyPrototypeIntegrity,
 } = require('./middleware/prototypePollutionProtection');
 const { validateRedisInputs } = require('./middleware/noSqlInjectionPrevention');
+const { metricsMiddleware } = require('./services/advancedMetrics');
 
 // Freeze prototypes at startup to prevent pollution
 freezePrototypes();
@@ -168,6 +169,9 @@ if (process.env.NODE_ENV !== 'test') {
   app.use(morganMiddleware);
   app.use(logSlowRequest);
 }
+
+// Advanced metrics collection
+app.use(metricsMiddleware);
 
 // ===========================================
 // Input Validation

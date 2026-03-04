@@ -11,6 +11,7 @@ const { getRedisClient, isRedisConnected, getFailureMode } = require('../config/
 const logger = require('../utils/logger');
 const { createError } = require('./errorHandler');
 const { validateRateLimitKey } = require('./bypassPrevention');
+const { recordRateLimit } = require('../services/advancedMetrics');
 
 // Store rate limiters
 const rateLimiters = new Map();
@@ -502,6 +503,9 @@ const createRateLimiterMiddleware = (options = {}) => {
       // Set comprehensive rate limit headers
       setRateLimitHeaders(res, rateLimiterRes, activeConfig);
 
+      // Record successful rate limit check
+      recordRateLimit('pass', key, req.path);
+
       next();
     } catch (error) {
       // Rate limit exceeded
@@ -530,6 +534,9 @@ const createRateLimiterMiddleware = (options = {}) => {
           limit: limitConfig.points,
           window: limitConfig.duration,
         });
+
+        // Record rate limit block
+        recordRateLimit('blocked', getClientIdentifier(req, limitConfig.identifierType), req.path);
 
         return res.status(429).json({
           error: {

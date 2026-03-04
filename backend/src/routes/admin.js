@@ -18,6 +18,7 @@ const dataRetention = require('../services/dataRetention');
 const auditLog = require('../services/auditLog');
 const securityMonitor = require('../services/securityMonitor');
 const apiKeyService = require('../services/apiKeyService');
+const advancedMetrics = require('../services/advancedMetrics');
 const { getRequestStats, resetRequestStats } = require('../middleware/requestTracker');
 const { createError } = require('../middleware/errorHandler');
 const logger = require('../utils/logger');
@@ -1219,6 +1220,62 @@ router.get('/apikeys/stats', async (req, res, next) => {
   } catch (error) {
     logger.error('Failed to get API key stats', { error: error.message });
     next(createError('INTERNAL_ERROR', 'Failed to retrieve API key statistics'));
+  }
+});
+
+// ===========================================
+// Advanced Metrics Management
+// ===========================================
+
+/**
+ * Get metrics in JSON format
+ * GET /admin/metrics
+ */
+router.get('/metrics', async (req, res, next) => {
+  try {
+    const metrics = await advancedMetrics.exportJsonMetrics();
+
+    res.json({
+      success: true,
+      data: metrics,
+    });
+  } catch (error) {
+    logger.error('Failed to export metrics', { error: error.message });
+    next(createError('INTERNAL_ERROR', 'Failed to retrieve metrics'));
+  }
+});
+
+/**
+ * Get metrics in Prometheus format
+ * GET /admin/metrics/prometheus
+ */
+router.get('/metrics/prometheus', async (req, res, next) => {
+  try {
+    const metrics = await advancedMetrics.exportPrometheusMetrics();
+
+    res.set('Content-Type', 'text/plain');
+    res.send(metrics);
+  } catch (error) {
+    logger.error('Failed to export Prometheus metrics', { error: error.message });
+    next(createError('INTERNAL_ERROR', 'Failed to retrieve Prometheus metrics'));
+  }
+});
+
+/**
+ * Reset metrics
+ * POST /admin/metrics/reset
+ */
+router.post('/metrics/reset', (req, res) => {
+  try {
+    advancedMetrics.resetMetrics();
+
+    res.json({
+      success: true,
+      message: 'Metrics reset successfully',
+    });
+  } catch (error) {
+    logger.error('Failed to reset metrics', { error: error.message });
+    next(createError('INTERNAL_ERROR', 'Failed to reset metrics'));
   }
 });
 

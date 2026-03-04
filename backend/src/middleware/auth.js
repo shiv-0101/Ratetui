@@ -14,6 +14,7 @@ const {
 const { getRedisClient, isRedisConnected } = require('../config/redis');
 const logger = require('../utils/logger');
 const { createError } = require('./errorHandler');
+const { recordAuth } = require('../services/advancedMetrics');
 
 /**
  * Authentication middleware
@@ -66,6 +67,12 @@ const authenticate = async (req, res, next) => {
       ip: req.ip 
     });
 
+    // Record successful authentication
+    recordAuth('success', 'jwt');
+Record failed authentication
+    recordAuth('failure', 'jwt');
+
+    // 
     next();
   } catch (error) {
     // Handle specific error cases

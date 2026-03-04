@@ -8,6 +8,7 @@
 
 const logger = require('../utils/logger');
 const { maskSensitiveData } = require('../utils/logger');
+const { recordError } = require('../services/advancedMetrics');
 
 /**
  * Custom API Error class
@@ -176,6 +177,9 @@ const errorHandler = (err, req, res, _next) => {
     'Content-Type': 'application/json',
     'X-Content-Type-Options': 'nosniff',
   });
+
+  // Record error metrics
+  recordError(statusCode >= 500 ? 'server' : 'client', errorCode);
 
   // Send error response
   res.status(statusCode).json(errorResponse);
