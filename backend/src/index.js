@@ -62,6 +62,7 @@ const {
 } = require('./middleware/prototypePollutionProtection');
 const { validateRedisInputs } = require('./middleware/noSqlInjectionPrevention');
 const { metricsMiddleware } = require('./services/advancedMetrics');
+const { setupGracefulShutdown, requestTracker } = require('./services/gracefulShutdown');
 
 // Freeze prototypes at startup to prevent pollution
 freezePrototypes();
@@ -193,6 +194,8 @@ app.use(setCsrfToken);
 // Request Tracking & Metrics
 // ===========================================
 
+// Track active requests for graceful shutdown
+app.use(requestTracker);
 
 // Track requests for metrics and IP checks
 app.use(requestTrackerWithIPCheck);
@@ -302,8 +305,8 @@ async function startServer() {
     // Configure server-level timeouts (slow loris protection)
     configureServerTimeouts(server);
 
-    // Configure server-level timeouts (slow loris protection)
-    configureServerTimeouts(server);
+    // Setup graceful shutdown handlers
+    setupGracefulShutdown(server);
 
     // Start periodic data retention cleanup (every 6 hours)
     const CLEANUP_INTERVAL = 6 * 60 * 60 * 1000; // 6 hours
@@ -325,67 +328,6 @@ async function startServer() {
         logger.error('Initial cleanup failed:', { error: error.message });
       }
     }, 5 * 60 * 1000);
-
-    // Track active connections for graceful shutdown
-    const activeConnections = new Set();
-    let isShuttingDown = false;
-
-    server.on('connection', (socket) => {
-      activeConnections.add(socket);
-      socket.on('close', () => activeConnections.delete(socket));
-    });
-
-    // Graceful shutdown with connection draining
-    const shutdown = async (signal) => {
-      if (isShuttingDown) return;
-      isShuttingDown = true;
-      
-      logger.info(`${signal} received. Shutting down gracefully...`);
-      logger.info(`Active connections: ${activeConnections.size}`);
-
-      // Stop periodic cleanup
-      if (cleanupInterval) {
-        clearInterval(cleanupInterval);
-        logger.info('Stopped periodic cleanup job');
-      }
-
-      // Stop accepting new connections
-      server.close(async () => {
-        logger.info('HTTP server closed');
-        
-        await closeRedis();
-        logger.info('Redis connection closed');
-        
-        process.exit(0);
-      });
-
-      // Gracefully close existing connections
-      for (const socket of activeConnections) {
-        socket.end();
-      }
-
-      // Wait for connections to drain
-      const drainInterval = setInterval(() => {
-        if (activeConnections.size === 0) {
-          clearInterval(drainInterval);
-          logger.info('All connections drained');
-        } else {
-          logger.info(`Waiting for ${activeConnections.size} connections to close...`);
-        }
-      }, 1000);
-
-      // Force shutdown after 10 seconds
-      setTimeout(() => {
-        logger.error('Forced shutdown after timeout');
-        for (const socket of activeConnections) {
-          socket.destroy();
-        }
-        process.exit(1);
-      }, 10000);
-    };
-
-    process.on('SIGTERM', () => shutdown('SIGTERM'));
-    process.on('SIGINT', () => shutdown('SIGINT'));
 
   } catch (error) {
     logger.error('Failed to start server:', error);

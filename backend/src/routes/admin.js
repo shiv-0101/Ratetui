@@ -19,6 +19,7 @@ const auditLog = require('../services/auditLog');
 const securityMonitor = require('../services/securityMonitor');
 const apiKeyService = require('../services/apiKeyService');
 const advancedMetrics = require('../services/advancedMetrics');
+const { getShutdownStatus } = require('../services/gracefulShutdown');
 const { getRequestStats, resetRequestStats } = require('../middleware/requestTracker');
 const { createError } = require('../middleware/errorHandler');
 const logger = require('../utils/logger');
@@ -1277,6 +1278,30 @@ router.post('/metrics/reset', (req, res) => {
     logger.error('Failed to reset metrics', { error: error.message });
     next(createError('INTERNAL_ERROR', 'Failed to reset metrics'));
   }
+});
+
+/**
+ * Get server health and shutdown status
+ * GET /admin/health/status
+ */
+router.get('/health/status', (req, res) => {
+  const shutdownStatus = getShutdownStatus();
+  const systemMetrics = advancedMetrics.getSystemMetrics();
+
+  res.json({
+    success: true,
+    data: {
+      status: shutdownStatus.shuttingDown ? 'shutting_down' : 'healthy',
+      shutdown: shutdownStatus,
+      uptime: systemMetrics.process_uptime_seconds,
+      memory: {
+        heapUsed: systemMetrics.process_heap_bytes,
+        heapTotal: systemMetrics.process_heap_total_bytes,
+        rss: systemMetrics.process_rss_bytes,
+      },
+      timestamp: new Date().toISOString(),
+    },
+  });
 });
 
 module.exports = router;
