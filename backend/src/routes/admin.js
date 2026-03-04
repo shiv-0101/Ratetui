@@ -17,6 +17,7 @@ const metricsService = require('../services/metricsService');
 const dataRetention = require('../services/dataRetention');
 const auditLog = require('../services/auditLog');
 const securityMonitor = require('../services/securityMonitor');
+const apiKeyService = require('../services/apiKeyService');
 const { getRequestStats, resetRequestStats } = require('../middleware/requestTracker');
 const { createError } = require('../middleware/errorHandler');
 const logger = require('../utils/logger');
@@ -1113,6 +1114,111 @@ router.get('/security/events', async (req, res, next) => {
   } catch (error) {
     logger.error('Failed to get security events', { error: error.message });
     next(createError('INTERNAL_ERROR', 'Failed to retrieve security events'));
+  }
+});
+
+// ===========================================
+// API Key Management
+// ===========================================
+
+/**
+ * List user's API keys
+ * GET /admin/apikeys
+ */
+router.get('/apikeys', async (req, res, next) => {
+  try {
+    const keys = await apiKeyService.listUserApiKeys(req.user.id);
+
+    res.json({
+      success: true,
+      data: {
+        keys,
+        count: keys.length,
+      },
+    });
+  } catch (error) {
+    logger.error('Failed to list API keys', { error: error.message });
+    next(createError('INTERNAL_ERROR', 'Failed to retrieve API keys'));
+  }
+});
+
+/**
+ * Create new API key
+ * POST /admin/apikeys
+ */
+router.post(
+  '/apikeys',
+  [
+    body('name').trim().isLength({ min: 3, max: 100 }).withMessage('Name must be 3-100 characters'),
+    body('scopes').isArray().withMessage('Scopes must be an array'),
+    body('rateLimit').optional().isInt({ min: 1 }).withMessage('Rate limit must be positive integer'),
+    body('expiresInDays').optional().isInt({ min: 1, max: 365 }).withMessage('Expiry must be 1-365 days'),
+  ],
+  async (req, res, next) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        throw createError('VALIDATION_ERROR', 'Invalid API key parameters', { errors: errors.array() });
+      }
+
+      const { name, scopes, rateLimit, expiresInDays, metadata } = req.body;
+
+      const keyInfo = await apiKeyService.createApiKey({
+        userId: req.user.id,
+        name,
+        scopes,
+        rateLimit,
+        expiresInDays,
+        metadata,
+      });
+
+      res.json({
+        success: true,
+        data: keyInfo,
+        message: 'API key created successfully. Save the key securely - it will not be shown again.',
+      });
+    } catch (error) {
+      logger.error('Failed to create API key', { error: error.message });
+      next(createError('INTERNAL_ERROR', error.message || 'Failed to create API key'));
+    }
+  }
+);
+
+/**
+ * Revoke API key
+ * DELETE /admin/apikeys/:keyId
+ */
+router.delete('/apikeys/:keyId', async (req, res, next) => {
+  try {
+    const { keyId } = req.params;
+
+    await apiKeyService.revokeApiKey(keyId, req.user.id);
+
+    res.json({
+      success: true,
+      message: 'API key revoked successfully',
+    });
+  } catch (error) {
+    logger.error('Failed to revoke API key', { error: error.message });
+    next(createError('INTERNAL_ERROR', error.message || 'Failed to revoke API key'));
+  }
+});
+
+/**
+ * Get API key statistics
+ * GET /admin/apikeys/stats
+ */
+router.get('/apikeys/stats', async (req, res, next) => {
+  try {
+    const stats = await apiKeyService.getApiKeyStats();
+
+    res.json({
+      success: true,
+      data: stats,
+    });
+  } catch (error) {
+    logger.error('Failed to get API key stats', { error: error.message });
+    next(createError('INTERNAL_ERROR', 'Failed to retrieve API key statistics'));
   }
 });
 
