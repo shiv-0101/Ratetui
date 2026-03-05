@@ -15,6 +15,7 @@
 
 const { isRedisConnected, pingRedis, getConnectionStatus } = require('../config/redis');
 const { getShutdownStatus } = require('./gracefulShutdown');
+const { getCircuitStats, isCircuitOpen } = require('./circuitBreaker');
 const logger = require('../utils/logger');
 const os = require('os');
 const { promisify } = require('util');
@@ -133,6 +134,18 @@ const checkCpuHealth = () => {
  */
 const checkRedisHealth = async () => {
   try {
+    // Check circuit breaker state
+    const circuitOpen = isCircuitOpen();
+    if (circuitOpen) {
+      const circuitStats = getCircuitStats();
+      return {
+        status: 'circuit_open',
+        connected: false,
+        error: 'Circuit breaker is open',
+        circuit: circuitStats,
+      };
+    }
+    
     if (!isRedisConnected()) {
       const connStatus = getConnectionStatus();
       return {
@@ -141,6 +154,7 @@ const checkRedisHealth = async () => {
         error: connStatus.lastError?.message || 'Not connected',
         attempts: connStatus.attempts,
         failureMode: connStatus.failureMode,
+        circuit: getCircuitStats(),
       };
     }
     
@@ -159,6 +173,7 @@ const checkRedisHealth = async () => {
         connected: true,
         error: 'Ping timeout',
         latency: null,
+        circuit: getCircuitStats(),
       };
     }
     
@@ -174,6 +189,7 @@ const checkRedisHealth = async () => {
       connected: true,
       latency,
       latencyMs: `${latency}ms`,
+      circuit: getCircuitStats(),
     };
   } catch (error) {
     logger.error('Redis health check failed', { error: error.message });
@@ -181,6 +197,7 @@ const checkRedisHealth = async () => {
       status: 'unhealthy',
       connected: false,
       error: error.message,
+      circuit: getCircuitStats(),
     };
   }
 };

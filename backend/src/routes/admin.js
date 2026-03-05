@@ -20,6 +20,7 @@ const securityMonitor = require('../services/securityMonitor');
 const apiKeyService = require('../services/apiKeyService');
 const advancedMetrics = require('../services/advancedMetrics');
 const { getShutdownStatus } = require('../services/gracefulShutdown');
+const { getCircuitStats, resetCircuit } = require('../services/circuitBreaker');
 const { getRequestStats, resetRequestStats } = require('../middleware/requestTracker');
 const { createError } = require('../middleware/errorHandler');
 const logger = require('../utils/logger');
@@ -1302,6 +1303,41 @@ router.get('/health/status', (req, res) => {
       timestamp: new Date().toISOString(),
     },
   });
+});
+
+// ===========================================
+// Circuit Breaker Management
+// ===========================================
+
+/**
+ * Get circuit breaker status
+ * GET /admin/circuit/status
+ */
+router.get('/circuit/status', (req, res) => {
+  const stats = getCircuitStats();
+
+  res.json({
+    success: true,
+    data: stats,
+  });
+});
+
+/**
+ * Reset circuit breaker
+ * POST /admin/circuit/reset
+ */
+router.post('/circuit/reset', (req, res) => {
+  try {
+    resetCircuit();
+
+    res.json({
+      success: true,
+      message: 'Circuit breaker reset successfully',
+    });
+  } catch (error) {
+    logger.error('Failed to reset circuit breaker', { error: error.message });
+    next(createError('INTERNAL_ERROR', 'Failed to reset circuit breaker'));
+  }
 });
 
 module.exports = router;
