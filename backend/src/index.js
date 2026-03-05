@@ -63,6 +63,7 @@ const {
 const { validateRedisInputs } = require('./middleware/noSqlInjectionPrevention');
 const { metricsMiddleware } = require('./services/advancedMetrics');
 const { setupGracefulShutdown, requestTracker } = require('./services/gracefulShutdown');
+const { markInitialized } = require('./services/healthCheck');
 const { 
   createCompressionMiddleware, 
   logCompressionConfiguration 
@@ -310,6 +311,9 @@ async function startServer() {
     const server = app.listen(PORT, HOST, () => {
       logger.info(`Rate Limiter Server running on http://${HOST}:${PORT}`);
       logger.info(`Environment: ${process.env.NODE_ENV || 'development'}`);
+      
+      // Mark application as initialized (for health checks)
+      markInitialized();
     });
 
     // Configure server-level timeouts (slow loris protection)

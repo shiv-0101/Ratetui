@@ -14,6 +14,12 @@ const {
   testFailureMode,
   validateRedisConfig,
 } = require('../config/redis');
+const {
+  performHealthCheck,
+  checkLiveness,
+  checkReadiness,
+  checkStartup,
+} = require('../services/healthCheck');
 
 const router = express.Router();
 
@@ -134,21 +140,81 @@ router.get('/detailed', async (req, res) => {
 /**
  * Liveness probe (for Kubernetes)
  * GET /health/live
+ * 
+ * Kubernetes will restart the pod if this fails repeatedly
  */
-router.get('/live', (req, res) => {
-  res.status(200).json({ status: 'alive' });
+router.get('/live', async (req, res) => {
+  try {
+    const liveness = checkLiveness();
+    const statusCode = liveness.alive ? 200 : 503;
+    res.status(statusCode).json(liveness);
+  } catch (error) {
+    res.status(503).json({
+      alive: false,
+      status: 'error',
+      error: error.message,
+    });
+  }
 });
 
 /**
  * Readiness probe (for Kubernetes)
  * GET /health/ready
+ * 
+ * Kubernetes will remove pod from service if this fails
  */
 router.get('/ready', async (req, res) => {
-  if (isRedisConnected()) {
-    return res.status(200).json({ status: 'ready' });
+  try {
+    const readiness = await checkReadiness();
+    const statusCode = readiness.ready ? 200 : 503;
+    res.status(statusCode).json(readiness);
+  } catch (error) {
+    res.status(503).json({
+      ready: false,
+      status: 'error',
+      error: error.message,
+    });
   }
-  
-  res.status(503).json({ status: 'not ready', reason: 'Redis not connected' });
+});
+
+/**
+ * Startup probe (for Kubernetes)
+ * GET /health/startup
+ * 
+ * Kubernetes waits for this before checking liveness/readiness
+ */
+router.get('/startup', async (req, res) => {
+  try {
+    const startup = await checkStartup();
+    const statusCode = startup.started ? 200 : 503;
+    res.status(statusCode).json(startup);
+  } catch (error) {
+    res.status(503).json({
+      started: false,
+      status: 'error',
+      error: error.message,
+    });
+  }
+});
+
+/**
+ * Comprehensive health check
+ * GET /health/complete
+ * 
+ * Returns detailed status of all components
+ */
+router.get('/complete', async (req, res) => {
+  try {
+    const health = await performHealthCheck();
+    const statusCode = health.status === 'healthy' || health.status === 'warning' ? 200 : 503;
+    res.status(statusCode).json(health);
+  } catch (error) {
+    res.status(503).json({
+      status: 'error',
+      error: error.message,
+      timestamp: new Date().toISOString(),
+    });
+  }
 });
 
 /**
