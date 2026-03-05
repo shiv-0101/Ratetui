@@ -63,6 +63,10 @@ const {
 const { validateRedisInputs } = require('./middleware/noSqlInjectionPrevention');
 const { metricsMiddleware } = require('./services/advancedMetrics');
 const { setupGracefulShutdown, requestTracker } = require('./services/gracefulShutdown');
+const { 
+  createCompressionMiddleware, 
+  logCompressionConfiguration 
+} = require('./middleware/compression');
 
 // Freeze prototypes at startup to prevent pollution
 freezePrototypes();
@@ -126,6 +130,9 @@ app.use(hstsMiddleware);
 
 // Additional security headers
 app.use(additionalSecurityHeaders);
+
+// Response compression (gzip/brotli)
+app.use(createCompressionMiddleware());
 
 // Trust proxy (important for correct IP extraction)
 const trustProxy = process.env.TRUST_PROXY || 'loopback';
@@ -279,6 +286,9 @@ async function startServer() {
 
     // Log CSRF configuration
     logCsrfConfiguration();
+
+    // Log compression configuration
+    logCompressionConfiguration();
 
     // Log TLS configuration
     logTlsConfiguration();
