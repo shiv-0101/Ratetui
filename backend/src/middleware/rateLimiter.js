@@ -12,6 +12,7 @@ const logger = require('../utils/logger');
 const { createError } = require('./errorHandler');
 const { validateRateLimitKey } = require('./bypassPrevention');
 const { recordRateLimit } = require('../services/advancedMetrics');
+const { recordEvent } = require('../services/rateLimitAnalytics');
 
 // Store rate limiters
 const rateLimiters = new Map();
@@ -506,6 +507,16 @@ const createRateLimiterMiddleware = (options = {}) => {
       // Record successful rate limit check
       recordRateLimit('pass', key, req.path);
 
+      // Record analytics event
+      recordEvent({
+        endpoint: `${req.method} ${req.path}`,
+        ip: extractClientIP(req),
+        userId: req.user?.id,
+        blocked: false,
+        limit: activeConfig.points,
+        remaining: rateLimiterRes.remainingPoints,
+      });
+
       next();
     } catch (error) {
       // Rate limit exceeded
@@ -537,6 +548,17 @@ const createRateLimiterMiddleware = (options = {}) => {
 
         // Record rate limit block
         recordRateLimit('blocked', getClientIdentifier(req, limitConfig.identifierType), req.path);
+
+        // Record analytics event
+        recordEvent({
+          endpoint: `${req.method} ${req.path}`,
+          ip: extractClientIP(req),
+          userId: req.user?.id,
+          blocked: true,
+          limit: limitConfig.points,
+          remaining: 0,
+          retryAfter,
+        });
 
         return res.status(429).json({
           error: {

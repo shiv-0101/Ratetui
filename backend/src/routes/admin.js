@@ -23,6 +23,7 @@ const { getShutdownStatus } = require('../services/gracefulShutdown');
 const { getCircuitStats, resetCircuit } = require('../services/circuitBreaker');
 const { invalidateCache, clearCache, getCacheStats } = require('../middleware/caching');
 const { getRequestStats, resetRequestStats } = require('../middleware/requestTracker');
+const analytics = require('../services/rateLimitAnalytics');
 const { createError } = require('../middleware/errorHandler');
 const logger = require('../utils/logger');
 
@@ -1401,6 +1402,169 @@ router.post('/cache/clear', async (req, res, next) => {
   } catch (error) {
     logger.error('Failed to clear cache', { error: error.message });
     next(createError('INTERNAL_ERROR', 'Failed to clear cache'));
+  }
+});
+
+// ===========================================
+// Rate Limit Analytics
+// ===========================================
+
+/**
+ * Get analytics summary
+ * GET /admin/analytics/summary
+ */
+router.get('/analytics/summary', async (req, res, next) => {
+  try {
+    const summary = await analytics.getSummary();
+
+    res.json({
+      success: true,
+      data: summary,
+    });
+  } catch (error) {
+    logger.error('Failed to get analytics summary', { error: error.message });
+    next(createError('INTERNAL_ERROR', 'Failed to retrieve analytics summary'));
+  }
+});
+
+/**
+ * Get endpoint statistics
+ * GET /admin/analytics/endpoints
+ */
+router.get('/analytics/endpoints', async (req, res, next) => {
+  try {
+    const limit = parseInt(req.query.limit, 10) || 20;
+    const endpoints = await analytics.getEndpointStats(limit);
+
+    res.json({
+      success: true,
+      data: endpoints,
+    });
+  } catch (error) {
+    logger.error('Failed to get endpoint stats', { error: error.message });
+    next(createError('INTERNAL_ERROR', 'Failed to retrieve endpoint statistics'));
+  }
+});
+
+/**
+ * Get IP statistics
+ * GET /admin/analytics/ips
+ */
+router.get('/analytics/ips', async (req, res, next) => {
+  try {
+    const limit = parseInt(req.query.limit, 10) || 20;
+    const ips = await analytics.getIpStats(limit);
+
+    res.json({
+      success: true,
+      data: ips,
+    });
+  } catch (error) {
+    logger.error('Failed to get IP stats', { error: error.message });
+    next(createError('INTERNAL_ERROR', 'Failed to retrieve IP statistics'));
+  }
+});
+
+/**
+ * Get top violators
+ * GET /admin/analytics/violators
+ */
+router.get('/analytics/violators', async (req, res, next) => {
+  try {
+    const limit = parseInt(req.query.limit, 10) || 10;
+    const violators = await analytics.getTopViolators(limit);
+
+    res.json({
+      success: true,
+      data: violators,
+    });
+  } catch (error) {
+    logger.error('Failed to get top violators', { error: error.message });
+    next(createError('INTERNAL_ERROR', 'Failed to retrieve violators'));
+  }
+});
+
+/**
+ * Get violations for specific IP
+ * GET /admin/analytics/violations/:ip
+ */
+router.get('/analytics/violations/:ip', async (req, res, next) => {
+  try {
+    const { ip } = req.params;
+    const limit = parseInt(req.query.limit, 10) || 50;
+    const violations = await analytics.getViolations(ip, limit);
+
+    res.json({
+      success: true,
+      data: violations,
+      ip,
+    });
+  } catch (error) {
+    logger.error('Failed to get violations', { error: error.message });
+    next(createError('INTERNAL_ERROR', 'Failed to retrieve violations'));
+  }
+});
+
+/**
+ * Get time series data
+ * GET /admin/analytics/timeseries
+ */
+router.get('/analytics/timeseries', async (req, res, next) => {
+  try {
+    const hours = parseInt(req.query.hours, 10) || 24;
+    const timeSeries = await analytics.getTimeSeries(hours);
+
+    res.json({
+      success: true,
+      data: timeSeries,
+    });
+  } catch (error) {
+    logger.error('Failed to get time series', { error: error.message });
+    next(createError('INTERNAL_ERROR', 'Failed to retrieve time series data'));
+  }
+});
+
+/**
+ * Generate complete analytics report
+ * GET /admin/analytics/report
+ */
+router.get('/analytics/report', async (req, res, next) => {
+  try {
+    const options = {
+      endpointLimit: parseInt(req.query.endpointLimit, 10) || 20,
+      ipLimit: parseInt(req.query.ipLimit, 10) || 20,
+      violatorLimit: parseInt(req.query.violatorLimit, 10) || 10,
+      timeSeriesHours: parseInt(req.query.timeSeriesHours, 10) || 24,
+    };
+
+    const report = await analytics.generateReport(options);
+
+    res.json({
+      success: true,
+      data: report,
+    });
+  } catch (error) {
+    logger.error('Failed to generate analytics report', { error: error.message });
+    next(createError('INTERNAL_ERROR', 'Failed to generate report'));
+  }
+});
+
+/**
+ * Clear analytics data
+ * DELETE /admin/analytics
+ */
+router.delete('/analytics', async (req, res, next) => {
+  try {
+    const deleted = await analytics.clearAnalytics();
+
+    res.json({
+      success: true,
+      data: { deleted },
+      message: `Cleared ${deleted} analytics keys`,
+    });
+  } catch (error) {
+    logger.error('Failed to clear analytics', { error: error.message });
+    next(createError('INTERNAL_ERROR', 'Failed to clear analytics data'));
   }
 });
 
