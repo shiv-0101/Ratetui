@@ -13,6 +13,7 @@
 
 const logger = require('../utils/logger');
 const { closeRedis } = require('../config/redis');
+const pubSub = require('./pubSubCoordination');
 
 /**
  * Graceful shutdown configuration
@@ -139,6 +140,14 @@ const closeServer = async () => {
  */
 const cleanupResources = async () => {
   logger.info('Cleaning up resources...');
+  
+  try {
+    // Shutdown pub/sub
+    await pubSub.shutdown();
+    logger.info('Pub/sub coordination closed');
+  } catch (error) {
+    logger.error('Error shutting down pub/sub', { error: error.message });
+  }
   
   try {
     // Close Redis connection

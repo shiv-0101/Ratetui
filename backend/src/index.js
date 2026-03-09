@@ -68,6 +68,8 @@ const {
   createCompressionMiddleware, 
   logCompressionConfiguration 
 } = require('./middleware/compression');
+const pubSub = require('./services/pubSubCoordination');
+const { setupCacheHandlers } = require('./middleware/caching');
 
 // Freeze prototypes at startup to prevent pollution
 freezePrototypes();
@@ -306,6 +308,11 @@ async function startServer() {
     // Connect to Redis
     await connectRedis();
     logger.info('Connected to Redis');
+
+    // Initialize pub/sub for distributed coordination
+    await pubSub.initialize();
+    setupCacheHandlers();
+    logger.info('Pub/sub coordination initialized');
 
     // Start server
     const server = app.listen(PORT, HOST, () => {

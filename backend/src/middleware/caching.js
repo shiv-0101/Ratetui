@@ -19,6 +19,7 @@
 const crypto = require('crypto');
 const { getRedisClient, isRedisConnected } = require('../config/redis');
 const { withCircuitBreaker } = require('../services/circuitBreaker');
+const pubSub = require('../services/pubSubCoordination');
 const logger = require('../utils/logger');
 
 /**
@@ -272,6 +273,9 @@ const getFromCache = async (key) => {
 const invalidateCache = async (key) => {
   let count = 0;
   
+  // Broadcast invalidation to other instances
+  await pubSub.broadcastCacheInvalidate(key);
+  
   // Invalidate in Redis
   if (isRedisConnected()) {
     try {
@@ -320,6 +324,9 @@ const invalidateCache = async (key) => {
  * @returns {Promise<void>}
  */
 const clearCache = async () => {
+  // Broadcast clear to other instances
+  await pubSub.broadcastCacheClear();
+  
   // Clear Redis cache
   if (isRedisConnected()) {
     try {
@@ -498,11 +505,49 @@ const getCacheStats = async () => {
   return stats;
 };
 
+/**
+ * Setup pub/sub handlers for cache synchronization
+ */
+const setupCacheHandlers = () => {
+  // Handle cache invalidation from other instances
+  pubSub.onMessage(pubSub.CHANNELS.CACHE_INVALIDATE, async (data) => {
+    const { key } = data;
+    
+    logger.debug('Received cache invalidation broadcast', { key });
+    
+    // Only invalidate local memory cache (Redis already handled by broadcaster)
+    if (key.includes('*')) {
+      const pattern = key.replace(/\*/g, '.*');
+      const regex = new RegExp(pattern);
+      
+      for (const [cacheKey] of memoryCache) {
+        if (regex.test(cacheKey)) {
+          memoryCache.delete(cacheKey);
+        }
+      }
+    } else {
+      memoryCache.delete(key);
+    }
+  });
+
+  // Handle cache clear from other instances
+  pubSub.onMessage(pubSub.CHANNELS.CACHE_CLEAR, async () => {
+    logger.debug('Received cache clear broadcast');
+    
+    // Only clear local memory cache
+    memoryCache.clear();
+    memoryCacheOrder.length = 0;
+  });
+
+  logger.info('Cache pub/sub handlers registered');
+};
+
 module.exports = {
   caching,
   invalidateCache,
   clearCache,
   getCacheStats,
   generateCacheKey,
+  setupCacheHandlers,
   CACHE_CONFIG,
 };

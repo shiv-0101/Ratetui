@@ -24,6 +24,7 @@ const { getCircuitStats, resetCircuit } = require('../services/circuitBreaker');
 const { invalidateCache, clearCache, getCacheStats } = require('../middleware/caching');
 const { getRequestStats, resetRequestStats } = require('../middleware/requestTracker');
 const analytics = require('../services/rateLimitAnalytics');
+const pubSub = require('../services/pubSubCoordination');
 const { createError } = require('../middleware/errorHandler');
 const logger = require('../utils/logger');
 
@@ -1565,6 +1566,28 @@ router.delete('/analytics', async (req, res, next) => {
   } catch (error) {
     logger.error('Failed to clear analytics', { error: error.message });
     next(createError('INTERNAL_ERROR', 'Failed to clear analytics data'));
+  }
+});
+
+// ===========================================
+// Distributed Coordination
+// ===========================================
+
+/**
+ * Get pub/sub coordination status
+ * GET /admin/coordination/status
+ */
+router.get('/coordination/status', async (req, res, next) => {
+  try {
+    const status = pubSub.getStatus();
+
+    res.json({
+      success: true,
+      data: status,
+    });
+  } catch (error) {
+    logger.error('Failed to get coordination status', { error: error.message });
+    next(createError('INTERNAL_ERROR', 'Failed to retrieve coordination status'));
   }
 });
 
