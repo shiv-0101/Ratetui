@@ -21,6 +21,7 @@ const apiKeyService = require('../services/apiKeyService');
 const advancedMetrics = require('../services/advancedMetrics');
 const { getShutdownStatus } = require('../services/gracefulShutdown');
 const { getCircuitStats, resetCircuit } = require('../services/circuitBreaker');
+const { invalidateCache, clearCache, getCacheStats } = require('../middleware/caching');
 const { getRequestStats, resetRequestStats } = require('../middleware/requestTracker');
 const { createError } = require('../middleware/errorHandler');
 const logger = require('../utils/logger');
@@ -1337,6 +1338,69 @@ router.post('/circuit/reset', (req, res) => {
   } catch (error) {
     logger.error('Failed to reset circuit breaker', { error: error.message });
     next(createError('INTERNAL_ERROR', 'Failed to reset circuit breaker'));
+  }
+});
+
+// ===========================================
+// Cache Management
+// ===========================================
+
+/**
+ * Get cache statistics
+ * GET /admin/cache/stats
+ */
+router.get('/cache/stats', async (req, res, next) => {
+  try {
+    const stats = await getCacheStats();
+
+    res.json({
+      success: true,
+      data: stats,
+    });
+  } catch (error) {
+    logger.error('Failed to get cache stats', { error: error.message });
+    next(createError('INTERNAL_ERROR', 'Failed to retrieve cache statistics'));
+  }
+});
+
+/**
+ * Invalidate cache by key or pattern
+ * DELETE /admin/cache/:key
+ */
+router.delete('/cache/:key', async (req, res, next) => {
+  try {
+    const { key } = req.params;
+    const count = await invalidateCache(key);
+
+    res.json({
+      success: true,
+      data: {
+        invalidated: count,
+        key,
+      },
+      message: `Invalidated ${count} cache entries`,
+    });
+  } catch (error) {
+    logger.error('Failed to invalidate cache', { error: error.message });
+    next(createError('INTERNAL_ERROR', 'Failed to invalidate cache'));
+  }
+});
+
+/**
+ * Clear all cache
+ * POST /admin/cache/clear
+ */
+router.post('/cache/clear', async (req, res, next) => {
+  try {
+    await clearCache();
+
+    res.json({
+      success: true,
+      message: 'Cache cleared successfully',
+    });
+  } catch (error) {
+    logger.error('Failed to clear cache', { error: error.message });
+    next(createError('INTERNAL_ERROR', 'Failed to clear cache'));
   }
 });
 

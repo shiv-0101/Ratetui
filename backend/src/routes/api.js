@@ -7,6 +7,7 @@
 
 const express = require('express');
 const { rateLimiters } = require('../middleware/rateLimiter');
+const { caching } = require('../middleware/caching');
 
 const router = express.Router();
 
@@ -17,20 +18,23 @@ router.use(rateLimiters.api);
  * Example public endpoint
  * GET /api/data
  * Rate limit: 200 req/min (from general API limiter)
+ * Cached for 5 minutes
  */
-router.get('/data', (req, res) => {
-  res.json({
-    success: true,
-    data: {
-      message: 'This is rate-limited data',
-      timestamp: new Date().toISOString(),
-      rateLimit: {
-        limit: 200,
-        window: '60s',
-      },
-    }
+router.get('/data', 
+  caching({ ttl: 300 }),
+  (req, res) => {
+    res.json({
+      success: true,
+      data: {
+        message: 'This is rate-limited data',
+        timestamp: new Date().toISOString(),
+        rateLimit: {
+          limit: 200,
+          window: '60s',
+        },
+      }
+    });
   });
-});
 
 /**
  * Example expensive operation endpoint
