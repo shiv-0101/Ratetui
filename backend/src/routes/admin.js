@@ -9,6 +9,7 @@ const express = require('express');
 const { body, validationResult } = require('express-validator');
 const { authenticate } = require('../middleware/auth');
 const { requireAdmin, requirePermission } = require('../middleware/authorize');
+const { adminIPAccessControl } = require('../middleware/adminAccess');
 const { rateLimiters } = require('../middleware/rateLimiter');
 const { ruleValidationRules, validate } = require('../validators/ruleValidator');
 const ruleService = require('../services/ruleService');
@@ -29,6 +30,9 @@ const { createError } = require('../middleware/errorHandler');
 const logger = require('../utils/logger');
 
 const router = express.Router();
+
+// Apply IP-based access control first (optional security layer)
+router.use(adminIPAccessControl());
 
 // Apply authentication and admin authorization to all admin routes
 router.use(authenticate);

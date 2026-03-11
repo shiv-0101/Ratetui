@@ -61,6 +61,7 @@ const {
   verifyPrototypeIntegrity,
 } = require('./middleware/prototypePollutionProtection');
 const { validateRedisInputs } = require('./middleware/noSqlInjectionPrevention');
+const { logAdminIPAllowlistConfig } = require('./middleware/adminAccess');
 const { metricsMiddleware } = require('./services/advancedMetrics');
 const { setupGracefulShutdown, requestTracker } = require('./services/gracefulShutdown');
 const { markInitialized } = require('./services/healthCheck');
@@ -304,6 +305,9 @@ async function startServer() {
 
     // Log security headers configuration
     logSecurityHeadersConfiguration();
+
+    // Log admin IP allowlist configuration
+    logAdminIPAllowlistConfig();
 
     // Connect to Redis
     await connectRedis();
