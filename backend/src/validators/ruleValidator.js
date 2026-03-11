@@ -106,6 +106,45 @@ const ruleValidationRules = () => {
       .optional()
       .isBoolean()
       .withMessage('Enabled must be a boolean'),
+
+    // Conditions validation (optional)
+    body('conditions')
+      .optional()
+      .isObject()
+      .withMessage('Conditions must be an object'),
+
+    // Time range validation (if conditions.timeRange is provided)
+    body('conditions.timeRange')
+      .optional()
+      .isObject()
+      .withMessage('timeRange must be an object'),
+
+    body('conditions.timeRange.start')
+      .optional()
+      .matches(/^([01]\d|2[0-3]):([0-5]\d)$/)
+      .withMessage('start time must be in HH:mm format (e.g., 09:00, 17:30)'),
+
+    body('conditions.timeRange.end')
+      .optional()
+      .matches(/^([01]\d|2[0-3]):([0-5]\d)$/)
+      .withMessage('end time must be in HH:mm format (e.g., 09:00, 17:30)'),
+
+    body('conditions.timeRange.timezone')
+      .optional()
+      .isString()
+      .withMessage('timezone must be a string (e.g., UTC, UTC-5, UTC+05:30)'),
+
+    // Validate that if timeRange is provided, both start and end are required
+    body('conditions')
+      .optional()
+      .custom((value) => {
+        if (value && value.timeRange) {
+          if (!value.timeRange.start || !value.timeRange.end) {
+            throw new Error('Both start and end times are required when using timeRange');
+          }
+        }
+        return true;
+      }),
   ];
 };
 
@@ -186,6 +225,45 @@ const ruleUpdateValidationRules = () => {
       .optional()
       .isBoolean()
       .withMessage('Enabled must be a boolean'),
+
+    // Conditions validation (optional)
+    body('conditions')
+      .optional()
+      .isObject()
+      .withMessage('Conditions must be an object'),
+
+    // Time range validation (if conditions.timeRange is provided)
+    body('conditions.timeRange')
+      .optional()
+      .isObject()
+      .withMessage('timeRange must be an object'),
+
+    body('conditions.timeRange.start')
+      .optional()
+      .matches(/^([01]\d|2[0-3]):([0-5]\d)$/)
+      .withMessage('start time must be in HH:mm format (e.g., 09:00, 17:30)'),
+
+    body('conditions.timeRange.end')
+      .optional()
+      .matches(/^([01]\d|2[0-3]):([0-5]\d)$/)
+      .withMessage('end time must be in HH:mm format (e.g., 09:00, 17:30)'),
+
+    body('conditions.timeRange.timezone')
+      .optional()
+      .isString()
+      .withMessage('timezone must be a string (e.g., UTC, UTC-5, UTC+05:30)'),
+
+    // Validate that if timeRange is provided, both start and end are required
+    body('conditions')
+      .optional()
+      .custom((value) => {
+        if (value && value.timeRange) {
+          if (!value.timeRange.start || !value.timeRange.end) {
+            throw new Error('Both start and end times are required when using timeRange');
+          }
+        }
+        return true;
+      }),
   ];
 };
 

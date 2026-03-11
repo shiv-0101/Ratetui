@@ -37,6 +37,7 @@ const createRule = async (ruleData) => {
     priority = 100,
     enabled = true,
     description = '',
+    conditions = null,
   } = ruleData;
 
   if (!name || !target || !limit) {
@@ -64,6 +65,7 @@ const createRule = async (ruleData) => {
     priority,
     enabled: enabled ? 'true' : 'false',
     description,
+    conditions: conditions ? JSON.stringify(conditions) : null,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   };
@@ -82,7 +84,13 @@ const createRule = async (ruleData) => {
 
   logger.info('Rate limit rule created', { ruleId, name, priority });
 
-  return { ...rule, target: JSON.parse(rule.target), limit: JSON.parse(rule.limit), enabled: rule.enabled === 'true' };
+  return { 
+    ...rule, 
+    target: JSON.parse(rule.target), 
+    limit: JSON.parse(rule.limit), 
+    enabled: rule.enabled === 'true',
+    conditions: rule.conditions ? JSON.parse(rule.conditions) : null,
+  };
 };
 
 /**
@@ -110,6 +118,7 @@ const getRuleById = async (ruleId) => {
     limit: JSON.parse(rule.limit),
     priority: parseInt(rule.priority),
     enabled: rule.enabled === 'true',
+    conditions: rule.conditions ? JSON.parse(rule.conditions) : null,
   };
 };
 
@@ -203,6 +212,9 @@ const updateRule = async (ruleId, updates) => {
   }
   if (updates.limit !== undefined) {
     updateData.limit = JSON.stringify(updates.limit);
+  }
+  if (updates.conditions !== undefined) {
+    updateData.conditions = updates.conditions ? JSON.stringify(updates.conditions) : null;
   }
 
   // Handle simple fields
@@ -307,6 +319,85 @@ const countRules = async () => {
   return redis.scard('rl:rules');
 };
 
+/**
+ * Check if a rule is currently active based on time-based conditions
+ * 
+ * @param {Object} rule - Rule object
+ * @returns {boolean} True if rule is active or has no time conditions
+ */
+const isRuleActiveNow = (rule) => {
+  // If no conditions or no timeRange, rule is always active
+  if (!rule.conditions || !rule.conditions.timeRange) {
+    return true;
+  }
+
+  const { timeRange } = rule.conditions;
+  const { start, end, timezone = 'UTC' } = timeRange;
+
+  if (!start || !end) {
+    return true; // Invalid time range, allow by default
+  }
+
+  try {
+    // Get current time in specified timezone
+    const now = new Date();
+    
+    // Parse HH:mm format (e.g., "09:00", "17:30")
+    const parseTime = (timeStr) => {
+      const [hours, minutes] = timeStr.split(':').map(Number);
+      return { hours, minutes };
+    };
+
+    const startTime = parseTime(start);
+    const endTime = parseTime(end);
+
+    // Get current time components
+    // Note: For production, use a timezone library like 'moment-timezone' or 'luxon'
+    // For now, we'll use UTC offset approximation
+    let currentHours = now.getUTCHours();
+    let currentMinutes = now.getUTCMinutes();
+
+    // Apply timezone offset (simplified - doesn't handle DST)
+    if (timezone !== 'UTC') {
+      // Parse timezone offset (e.g., "America/New_York", "UTC-5", "+05:30")
+      // For simplicity, this implementation works with offset notation
+      const offsetMatch = timezone.match(/UTC([+-]\d{1,2}):?(\d{2})?/);
+      if (offsetMatch) {
+        const offsetHours = parseInt(offsetMatch[1]);
+        const offsetMinutes = parseInt(offsetMatch[2] || '0');
+        currentHours = (currentHours + offsetHours + 24) % 24;
+        currentMinutes = currentMinutes + offsetMinutes;
+        if (currentMinutes >= 60) {
+          currentHours = (currentHours + 1) % 24;
+          currentMinutes -= 60;
+        }
+      }
+    }
+
+    // Convert to minutes since midnight for easier comparison
+    const currentMinutesSinceMidnight = currentHours * 60 + currentMinutes;
+    const startMinutesSinceMidnight = startTime.hours * 60 + startTime.minutes;
+    const endMinutesSinceMidnight = endTime.hours * 60 + endTime.minutes;
+
+    // Handle spans across midnight (e.g., 22:00 to 06:00)
+    if (startMinutesSinceMidnight <= endMinutesSinceMidnight) {
+      // Normal time range (e.g., 09:00 to 17:00)
+      return currentMinutesSinceMidnight >= startMinutesSinceMidnight && 
+             currentMinutesSinceMidnight < endMinutesSinceMidnight;
+    } else {
+      // Crosses midnight (e.g., 22:00 to 06:00 means active from 22:00-23:59 and 00:00-05:59)
+      return currentMinutesSinceMidnight >= startMinutesSinceMidnight || 
+             currentMinutesSinceMidnight < endMinutesSinceMidnight;
+    }
+  } catch (error) {
+    logger.error('Error checking rule time condition', { 
+      ruleId: rule.id, 
+      error: error.message 
+    });
+    return true; // On error, allow by default
+  }
+};
+
 module.exports = {
   createRule,
   getRuleById,
@@ -317,4 +408,5 @@ module.exports = {
   enableRule,
   disableRule,
   countRules,
+  isRuleActiveNow,
 };

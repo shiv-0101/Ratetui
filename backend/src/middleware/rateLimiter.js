@@ -13,6 +13,7 @@ const { createError } = require('./errorHandler');
 const { validateRateLimitKey } = require('./bypassPrevention');
 const { recordRateLimit } = require('../services/advancedMetrics');
 const { recordEvent } = require('../services/rateLimitAnalytics');
+const { isRuleActiveNow } = require('../models/RateLimitRule');
 
 // Store rate limiters
 const rateLimiters = new Map();
@@ -168,15 +169,28 @@ const findMatchingRule = async (req) => {
 
   // Rules are already sorted by priority (descending)
   for (const rule of rules) {
-    if (matchesRule(req, rule)) {
-      logger.debug('Request matched dynamic rule', {
+    // Check pattern matching
+    if (!matchesRule(req, rule)) {
+      continue;
+    }
+
+    // Check time-based conditions
+    if (!isRuleActiveNow(rule)) {
+      logger.debug('Rule matched but not active based on time conditions', {
         ruleId: rule.id,
         ruleName: rule.name,
-        priority: rule.priority,
-        path: req.path,
+        conditions: rule.conditions,
       });
-      return rule;
+      continue;
     }
+
+    logger.debug('Request matched dynamic rule', {
+      ruleId: rule.id,
+      ruleName: rule.name,
+      priority: rule.priority,
+      path: req.path,
+    });
+    return rule;
   }
 
   return null;
