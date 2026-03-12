@@ -391,12 +391,21 @@ const setRateLimitHeaders = (res, rateLimiterRes, config) => {
   const resetTime = Math.ceil(Date.now() / 1000) + Math.ceil(rateLimiterRes.msBeforeNext / 1000);
   const resetInSeconds = Math.ceil(rateLimiterRes.msBeforeNext / 1000);
   
+  // Use base limit for header if burst is configured, otherwise use total points
+  const limitForHeader = config.basePoints || config.points;
+  
   const headers = {
-    'X-RateLimit-Limit': String(config.points),
+    'X-RateLimit-Limit': String(limitForHeader),
     'X-RateLimit-Remaining': String(remaining),
     'X-RateLimit-Reset': String(resetTime),
     'X-RateLimit-Window': `${config.duration}s`,
   };
+  
+  // Add burst header if burst allowance is configured
+  if (config.burstPoints && config.burstPoints > 0) {
+    headers['X-RateLimit-Burst'] = String(config.burstPoints);
+    headers['X-RateLimit-Total'] = String(config.points); // Total with burst
+  }
   
   if (remaining === 0) {
     headers['X-RateLimit-RetryAfter'] = String(resetInSeconds);
@@ -444,10 +453,18 @@ const createRateLimiterMiddleware = (options = {}) => {
         if (matchingRule) {
           // Override config with dynamic rule
           const duration = parseTimeWindow(matchingRule.limit.window);
+          const baseRequests = matchingRule.limit.requests;
+          const burstAllowance = matchingRule.limit.burst || 0;
+          
+          // Total points = base requests + burst allowance
+          const totalPoints = baseRequests + burstAllowance;
+          
           activeConfig = {
             ...config,
             keyPrefix: `rule:${matchingRule.id}`,
-            points: matchingRule.limit.requests,
+            points: totalPoints,
+            basePoints: baseRequests,  // Store base for header calculation
+            burstPoints: burstAllowance,
             duration: duration,
             blockDuration: config.blockDuration,
           };
@@ -455,7 +472,9 @@ const createRateLimiterMiddleware = (options = {}) => {
           logger.debug('Applying dynamic rule', {
             ruleId: matchingRule.id,
             ruleName: matchingRule.name,
-            limit: matchingRule.limit.requests,
+            limit: baseRequests,
+            burst: burstAllowance,
+            total: totalPoints,
             window: matchingRule.limit.window,
           });
 

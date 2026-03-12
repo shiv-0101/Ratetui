@@ -89,6 +89,22 @@ const ruleValidationRules = () => {
         return true;
       }),
 
+    // Burst allowance validation (optional)
+    body('limit.burst')
+      .optional()
+      .isInt({ min: 0, max: 10000 })
+      .withMessage('Burst allowance must be between 0 and 10,000')
+      .custom((value, { req }) => {
+        // Burst should not exceed the base request limit by too much
+        if (req.body.limit && req.body.limit.requests) {
+          const baseLimit = req.body.limit.requests;
+          if (value > baseLimit) {
+            throw new Error('Burst allowance should not exceed the base request limit');
+          }
+        }
+        return true;
+      }),
+
     // Action validation
     body('action')
       .optional()
@@ -198,6 +214,34 @@ const ruleUpdateValidationRules = () => {
       .custom((value) => {
         const match = value.match(/^(\d+)(s|m|h|d)$/);
         if (!match) return false;
+
+        const num = parseInt(match[1]);
+        const unit = match[2];
+
+        const multipliers = { s: 1, m: 60, h: 3600, d: 86400 };
+        const seconds = num * multipliers[unit];
+
+        if (seconds < 1 || seconds > 86400) {
+          throw new Error('Time window must be between 1 second and 1 day');
+        }
+
+        return true;
+      }),
+
+    // Burst allowance validation (optional)
+    body('limit.burst')
+      .optional()
+      .isInt({ min: 0, max: 10000 })
+      .withMessage('Burst allowance must be between 0 and 10,000')
+      .custom((value, { req }) => {
+        if (req.body.limit && req.body.limit.requests) {
+          const baseLimit = req.body.limit.requests;
+          if (value > baseLimit) {
+            throw new Error('Burst allowance should not exceed the base request limit');
+          }
+        }
+        return true;
+      }),
         const num = parseInt(match[1]);
         const unit = match[2];
         const multipliers = { s: 1, m: 60, h: 3600, d: 86400 };
