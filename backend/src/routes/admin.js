@@ -27,6 +27,7 @@ const { getRequestStats, resetRequestStats } = require('../middleware/requestTra
 const analytics = require('../services/rateLimitAnalytics');
 const pubSub = require('../services/pubSubCoordination');
 const { createError } = require('../middleware/errorHandler');
+const { getRedisClient, isRedisConnected } = require('../config/redis');
 const logger = require('../utils/logger');
 
 const router = express.Router();
@@ -1193,6 +1194,97 @@ router.post(
     }
   }
 );
+
+/**
+ * Reset rate limit counter for IP or user
+ * DELETE /admin/ratelimit/counter
+ * Body: { type: 'ip' | 'user', value: string, endpoint?: string }
+ */
+router.delete('/ratelimit/counter', [
+  body('type').isIn(['ip', 'user']).withMessage('Type must be ip or user'),
+  body('value').notEmpty().withMessage('Value is required'),
+  body('endpoint').optional().isString().withMessage('Endpoint must be a string'),
+], async (req, res, next) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return next(createError('VALIDATION_ERROR', 'Invalid input', { errors: errors.array() }));
+    }
+
+    const { type, value, endpoint } = req.body;
+
+    if (!isRedisConnected()) {
+      return next(createError('INTERNAL_ERROR', 'Redis connection required'));
+    }
+
+    const redis = getRedisClient();
+    let deletedCount = 0;
+
+    // Construct key patterns based on type
+    let patterns = [];
+    if (endpoint) {
+      // Specific endpoint counter
+      patterns.push(`ratelimit:${type}:${value}:${endpoint}`);
+    } else {
+      // All counters for this IP/user
+      patterns.push(`ratelimit:*:${value}:*`);
+      patterns.push(`ratelimit:${type}:${value}`);
+      patterns.push(`ratelimit:${type}:${value}:*`);
+    }
+
+    // Find and delete matching keys
+    for (const pattern of patterns) {
+      const keys = await redis.keys(pattern);
+      if (keys && keys.length > 0) {
+        await redis.del(...keys);
+        deletedCount += keys.length;
+      }
+    }
+
+    // Log the action
+    logger.warn('Rate limit counter reset', {
+      type,
+      value,
+      endpoint: endpoint || 'all',
+      deletedKeys: deletedCount,
+      user: req.user.id,
+    });
+
+    // Create audit log
+    await auditLog.createAuditLog({
+      category: auditLog.AUDIT_CATEGORIES.SECURITY_EVENT,
+      action: auditLog.AUDIT_ACTIONS.CUSTOM,
+      actor: req.user.id,
+      actorType: 'user',
+      target: value,
+      targetType: type,
+      result: auditLog.AUDIT_RESULTS.SUCCESS,
+      ipAddress: req.ip,
+      userAgent: req.get('user-agent'),
+      details: {
+        action: 'RESET_RATE_LIMIT_COUNTER',
+        type,
+        value,
+        endpoint: endpoint || 'all',
+        deletedKeys: deletedCount,
+      },
+    });
+
+    res.json({
+      success: true,
+      message: `Rate limit counter reset for ${type}: ${value}`,
+      data: {
+        type,
+        value,
+        endpoint: endpoint || 'all',
+        deletedKeys: deletedCount,
+      },
+    });
+  } catch (error) {
+    logger.error('Failed to reset rate limit counter', { error: error.message });
+    next(createError('INTERNAL_ERROR', 'Failed to reset rate limit counter'));
+  }
+});
 
 /**
  * Revoke API key
