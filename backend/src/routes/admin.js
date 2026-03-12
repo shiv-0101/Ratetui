@@ -14,6 +14,7 @@ const { rateLimiters } = require('../middleware/rateLimiter');
 const { ruleValidationRules, validate } = require('../validators/ruleValidator');
 const ruleService = require('../services/ruleService');
 const ipManagement = require('../services/ipManagement');
+const userManagement = require('../services/userManagement');
 const metricsService = require('../services/metricsService');
 const dataRetention = require('../services/dataRetention');
 const auditLog = require('../services/auditLog');
@@ -567,6 +568,235 @@ router.get('/ip/stats', async (req, res, next) => {
   } catch (error) {
     logger.error('Failed to get IP stats', { error: error.message });
     next(createError('INTERNAL_ERROR', 'Failed to get IP statistics'));
+  }
+});
+
+// ===========================================
+// User Blocking & Whitelist Management
+// ===========================================
+
+/**
+ * Get blocked users
+ * GET /admin/user/blocked
+ * Query params: limit, offset
+ */
+router.get('/user/blocked', async (req, res, next) => {
+  try {
+    const limit = parseInt(req.query.limit) || 100;
+    const offset = parseInt(req.query.offset) || 0;
+
+    const blacklistedUsers = await userManagement.getBlacklistedUsers({ limit, offset });
+    const stats = await userManagement.getUserStats();
+
+    logger.info('Blacklisted users retrieved', { 
+      count: blacklistedUsers.length, 
+      user: req.user.id 
+    });
+
+    res.json({
+      success: true,
+      data: {
+        blacklisted: blacklistedUsers,
+        count: blacklistedUsers.length,
+        total: stats.blacklisted,
+        limit,
+        offset,
+      }
+    });
+  } catch (error) {
+    logger.error('Failed to retrieve blacklisted users', { error: error.message });
+    next(createError('INTERNAL_ERROR', 'Failed to retrieve blacklisted users'));
+  }
+});
+
+/**
+ * Get whitelisted users
+ * GET /admin/user/whitelisted
+ * Query params: limit, offset
+ */
+router.get('/user/whitelisted', async (req, res, next) => {
+  try {
+    const limit = parseInt(req.query.limit) || 100;
+    const offset = parseInt(req.query.offset) || 0;
+
+    const whitelistedUsers = await userManagement.getWhitelistedUsers({ limit, offset });
+    const stats = await userManagement.getUserStats();
+
+    logger.info('Whitelisted users retrieved', { 
+      count: whitelistedUsers.length, 
+      user: req.user.id 
+    });
+
+    res.json({
+      success: true,
+      data: {
+        whitelisted: whitelistedUsers,
+        count: whitelistedUsers.length,
+        total: stats.whitelisted,
+        limit,
+        offset,
+      }
+    });
+  } catch (error) {
+    logger.error('Failed to retrieve whitelisted users', { error: error.message });
+    next(createError('INTERNAL_ERROR', 'Failed to retrieve whitelisted users'));
+  }
+});
+
+/**
+ * Check user status
+ * GET /admin/user/check/:userId
+ */
+router.get('/user/check/:userId', async (req, res, next) => {
+  try {
+    const { userId } = req.params;
+
+    const blacklistEntry = await userManagement.isUserBlacklisted(userId);
+    const whitelistEntry = await userManagement.isUserWhitelisted(userId);
+
+    let status = 'normal';
+    if (blacklistEntry) status = 'blacklisted';
+    if (whitelistEntry) status = 'whitelisted';
+
+    res.json({
+      success: true,
+      data: {
+        userId,
+        status,
+        blacklist: blacklistEntry,
+        whitelist: whitelistEntry,
+      }
+    });
+  } catch (error) {
+    logger.error('Failed to check user status', { userId: req.params.userId, error: error.message });
+    next(createError('INTERNAL_ERROR', 'Failed to check user status'));
+  }
+});
+
+/**
+ * Blacklist a user
+ * POST /admin/user/blacklist
+ * Body: { userId, duration, reason }
+ */
+router.post('/user/blacklist', [
+  body('userId').notEmpty().withMessage('User ID is required'),
+  body('duration').optional().isInt({ min: 0 }).withMessage('Duration must be a positive integer'),
+  body('reason').optional().isString().withMessage('Reason must be a string'),
+], async (req, res, next) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return next(createError('VALIDATION_ERROR', 'Invalid input', { errors: errors.array() }));
+    }
+
+    const { userId, duration = 0, reason = '' } = req.body;
+
+    const entry = await userManagement.blacklistUser(userId, duration, reason, req.user);
+
+    logger.info('User blacklisted', { userId, duration, user: req.user.id });
+
+    res.status(201).json({
+      success: true,
+      data: { entry },
+      message: `User ${userId} blacklisted successfully`
+    });
+  } catch (error) {
+    logger.error('Failed to blacklist user', { error: error.message });
+    next(createError('INTERNAL_ERROR', error.message || 'Failed to blacklist user'));
+  }
+});
+
+/**
+ * Unblacklist a user
+ * DELETE /admin/user/blacklist/:userId
+ */
+router.delete('/user/blacklist/:userId', async (req, res, next) => {
+  try {
+    const { userId } = req.params;
+
+    await userManagement.unblacklistUser(userId, req.user);
+
+    logger.info('User unblacklisted', { userId, user: req.user.id });
+
+    res.json({
+      success: true,
+      message: `User ${userId} removed from blacklist`
+    });
+  } catch (error) {
+    logger.error('Failed to unblacklist user', { userId: req.params.userId, error: error.message });
+    next(createError('INTERNAL_ERROR', 'Failed to unblacklist user'));
+  }
+});
+
+/**
+ * Whitelist a user
+ * POST /admin/user/whitelist
+ * Body: { userId, reason }
+ */
+router.post('/user/whitelist', [
+  body('userId').notEmpty().withMessage('User ID is required'),
+  body('reason').optional().isString().withMessage('Reason must be a string'),
+], async (req, res, next) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return next(createError('VALIDATION_ERROR', 'Invalid input', { errors: errors.array() }));
+    }
+
+    const { userId, reason = '' } = req.body;
+
+    const entry = await userManagement.whitelistUser(userId, reason, req.user);
+
+    logger.info('User whitelisted', { userId, user: req.user.id });
+
+    res.status(201).json({
+      success: true,
+      data: { entry },
+      message: `User ${userId} whitelisted successfully`
+    });
+  } catch (error) {
+    logger.error('Failed to whitelist user', { error: error.message });
+    next(createError('INTERNAL_ERROR', error.message || 'Failed to whitelist user'));
+  }
+});
+
+/**
+ * Remove user from whitelist
+ * DELETE /admin/user/whitelist/:userId
+ */
+router.delete('/user/whitelist/:userId', async (req, res, next) => {
+  try {
+    const { userId } = req.params;
+
+    await userManagement.unwhitelistUser(userId, req.user);
+
+    logger.info('User removed from whitelist', { userId, user: req.user.id });
+
+    res.json({
+      success: true,
+      message: `User ${userId} removed from whitelist`
+    });
+  } catch (error) {
+    logger.error('Failed to remove user from whitelist', { userId: req.params.userId, error: error.message });
+    next(createError('INTERNAL_ERROR', 'Failed to remove user from whitelist'));
+  }
+});
+
+/**
+ * Get user statistics
+ * GET /admin/user/stats
+ */
+router.get('/user/stats', async (req, res, next) => {
+  try {
+    const stats = await userManagement.getUserStats();
+
+    res.json({
+      success: true,
+      data: { stats }
+    });
+  } catch (error) {
+    logger.error('Failed to get user stats', { error: error.message });
+    next(createError('INTERNAL_ERROR', 'Failed to get user statistics'));
   }
 });
 
