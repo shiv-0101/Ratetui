@@ -1484,27 +1484,51 @@ router.delete('/ratelimit/counter', [
     }
 
     const redis = getRedisClient();
-    let deletedCount = 0;
+    const resetPrefixes = [
+      'ratelimit',
+      'api',
+      'auth',
+      'login',
+      'admin',
+      'search',
+      'expensive',
+      'upload',
+      'password_reset',
+      'email',
+      'apikey',
+      'rule',
+      'rlflx',
+    ];
 
-    // Construct key patterns based on type
-    let patterns = [];
-    if (endpoint) {
-      // Specific endpoint counter
-      patterns.push(`ratelimit:${type}:${value}:${endpoint}`);
-    } else {
-      // All counters for this IP/user
-      patterns.push(`ratelimit:*:${value}:*`);
-      patterns.push(`ratelimit:${type}:${value}`);
-      patterns.push(`ratelimit:${type}:${value}:*`);
+    const normalizedEndpoint = endpoint
+      ? String(endpoint).replace(/\s+/g, '').replace(/^\/+/, '')
+      : null;
+
+    const patterns = [];
+    for (const prefix of resetPrefixes) {
+      patterns.push(`${prefix}:${value}`);
+      patterns.push(`${prefix}:${value}:*`);
+
+      if (normalizedEndpoint) {
+        patterns.push(`${prefix}:${value}:*${normalizedEndpoint}*`);
+      }
     }
 
-    // Find and delete matching keys
-    for (const pattern of patterns) {
+    const uniquePatterns = [...new Set(patterns)];
+    const keysToDelete = new Set();
+
+    // Use KEYS here because this endpoint is explicit admin-only manual control.
+    for (const pattern of uniquePatterns) {
       const keys = await redis.keys(pattern);
-      if (keys && keys.length > 0) {
-        await redis.del(...keys);
-        deletedCount += keys.length;
+      for (const key of keys) {
+        keysToDelete.add(key);
       }
+    }
+
+    let deletedCount = 0;
+    if (keysToDelete.size > 0) {
+      const deleted = await redis.del(...keysToDelete);
+      deletedCount = Number(deleted) || 0;
     }
 
     // Log the action
@@ -1533,6 +1557,7 @@ router.delete('/ratelimit/counter', [
         value,
         endpoint: endpoint || 'all',
         deletedKeys: deletedCount,
+        patternsScanned: uniquePatterns.length,
       },
     });
 
@@ -1544,6 +1569,7 @@ router.delete('/ratelimit/counter', [
         value,
         endpoint: endpoint || 'all',
         deletedKeys: deletedCount,
+        patternsScanned: uniquePatterns.length,
       },
     });
   } catch (error) {
