@@ -81,11 +81,20 @@ router.get('/info', (req, res) => {
 /**
  * List all rate limit rules
  * GET /admin/rules
- * Query params: enabled (true/false), sort (priority/name/created)
+ * Query params: enabled (true/false), sort (priority/name/created),
+ * q (search by name/pattern), targetType, action, minPriority, maxPriority
  */
 router.get('/rules', async (req, res, next) => {
   try {
-    const { enabled, sort = 'priority' } = req.query;
+    const {
+      enabled,
+      sort = 'priority',
+      q,
+      targetType,
+      action,
+      minPriority,
+      maxPriority,
+    } = req.query;
     
     const options = {
       sortByPriority: sort === 'priority',
@@ -95,12 +104,39 @@ router.get('/rules', async (req, res, next) => {
       options.enabledOnly = enabled === 'true';
     }
 
-    const rules = await ruleService.getAllRules(options);
+    let rules = await ruleService.getAllRules(options);
+
+    if (q) {
+      const needle = String(q).toLowerCase();
+      rules = rules.filter((rule) => {
+        const name = String(rule.name || '').toLowerCase();
+        const pattern = String(rule.target?.pattern || '').toLowerCase();
+        return name.includes(needle) || pattern.includes(needle);
+      });
+    }
+
+    if (targetType) {
+      rules = rules.filter((rule) => String(rule.target?.type) === String(targetType));
+    }
+
+    if (action) {
+      rules = rules.filter((rule) => String(rule.action) === String(action));
+    }
+
+    const min = minPriority !== undefined ? parseInt(minPriority, 10) : null;
+    if (min !== null && !Number.isNaN(min)) {
+      rules = rules.filter((rule) => Number(rule.priority) >= min);
+    }
+
+    const max = maxPriority !== undefined ? parseInt(maxPriority, 10) : null;
+    if (max !== null && !Number.isNaN(max)) {
+      rules = rules.filter((rule) => Number(rule.priority) <= max);
+    }
 
     logger.info('Rules listed', { 
       count: rules.length, 
       user: req.user.id,
-      filters: { enabled, sort },
+      filters: { enabled, sort, q, targetType, action, minPriority, maxPriority },
     });
 
     res.json({
@@ -108,7 +144,7 @@ router.get('/rules', async (req, res, next) => {
       data: {
         rules,
         count: rules.length,
-        filters: { enabled, sort },
+        filters: { enabled, sort, q, targetType, action, minPriority, maxPriority },
       }
     });
   } catch (error) {
