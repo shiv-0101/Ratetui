@@ -15,6 +15,32 @@ const { getRedisClient, isRedisConnected } = require('../config/redis');
 const logger = require('../utils/logger');
 const { createError } = require('./errorHandler');
 const { recordAuth } = require('../services/advancedMetrics');
+const userManagement = require('../services/userManagement');
+
+/**
+ * Determine if the user should be denied based on admin-managed access lists.
+ * Whitelist takes precedence over blacklist.
+ */
+const isUserBlocked = async (userId) => {
+  if (!userId) {
+    return { blocked: false, reason: null };
+  }
+
+  const whitelistEntry = await userManagement.isUserWhitelisted(userId);
+  if (whitelistEntry) {
+    return { blocked: false, reason: null };
+  }
+
+  const blacklistEntry = await userManagement.isUserBlacklisted(userId);
+  if (blacklistEntry) {
+    return {
+      blocked: true,
+      reason: blacklistEntry.reason || 'User is blocked by administrator',
+    };
+  }
+
+  return { blocked: false, reason: null };
+};
 
 /**
  * Authentication middleware
@@ -60,6 +86,20 @@ const authenticate = async (req, res, next) => {
       jti: decoded.jti,
     };
 
+    // Enforce immediate user blocklist before route handlers run.
+    if (isRedisConnected()) {
+      const access = await isUserBlocked(req.user.id);
+      if (access.blocked) {
+        logger.warn('Blocked user attempted authenticated access', {
+          userId: req.user.id,
+          ip: req.ip,
+          reason: access.reason,
+        });
+        recordAuth('failure', 'blocked_user');
+        throw createError('USER_BLOCKED', access.reason);
+      }
+    }
+
     // Log successful authentication
     logger.info('User authenticated', { 
       userId: req.user.id, 
@@ -69,8 +109,6 @@ const authenticate = async (req, res, next) => {
 
     // Record successful authentication
     recordAuth('success', 'jwt');
-Record failed authentication
-    recordAuth('failure', 'jwt');
 
     // 
     next();
@@ -128,6 +166,13 @@ const optionalAuthenticate = async (req, res, next) => {
 
       if (blacklisted) {
         // Token blacklisted, continue without authentication
+        return next();
+      }
+    }
+
+    if (isRedisConnected()) {
+      const access = await isUserBlocked(decoded.sub);
+      if (access.blocked) {
         return next();
       }
     }
